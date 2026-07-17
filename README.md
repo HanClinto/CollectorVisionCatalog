@@ -80,3 +80,16 @@ downloaded from the CDN and embedded only after `--build` and a reviewed
 
 See [the Catalog v2 protocol](docs/catalog-v2.md) for the artifact and update
 design.
+
+## Local image-quality OCR
+
+On macOS, compile the thin Apple Vision wrapper once and stream image paths
+through it. Output is JSONL so audits can retain text evidence without coupling
+CI to a macOS-only backend:
+
+```bash
+swiftc -O scripts/apple_vision_ocr.swift -o /tmp/collectorvision-apple-ocr
+find /path/to/images -type f -name '*.jpg' |
+  /tmp/collectorvision-apple-ocr --stdin |
+  gzip -1 > apple-vision-ocr.jsonl.gz
+```
