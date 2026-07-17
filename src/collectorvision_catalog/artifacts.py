@@ -12,7 +12,7 @@ from typing import Any, Protocol
 from urllib.request import urlopen
 
 import numpy as np
-from numpy.typing import NDArray
+from numpy.typing import ArrayLike, NDArray
 from PIL import Image
 
 JSONValue = None | bool | int | float | str | list["JSONValue"] | dict[str, "JSONValue"]
@@ -400,6 +400,7 @@ def build_catalog(
     catalog_key: str,
     version: str,
     embedding_model: str,
+    seed_embeddings: Mapping[str, ArrayLike] | None = None,
     previous_build: CatalogBuild | None = None,
     image_loader: ImageLoader | None = None,
     batch_size: int = 16,
@@ -412,6 +413,8 @@ def build_catalog(
     normalized_rows = _prepare_rows(rows)
     if not normalized_rows:
         raise ValidationError("source rows must not be empty")
+    if previous_build is not None and seed_embeddings is not None:
+        raise ValidationError("seed_embeddings cannot be combined with previous_build")
     if previous_build is not None:
         _validate_previous_build(
             previous_build,
@@ -424,6 +427,7 @@ def build_catalog(
         embedder=embedder,
         image_loader=image_loader,
         previous_build=previous_build,
+        seed_embeddings=seed_embeddings,
         batch_size=batch_size,
     )
     delta_operations, delta_embeddings, metadata_operations = _build_deltas(
@@ -777,15 +781,25 @@ def _build_embeddings(
     embedder: Embedder,
     image_loader: ImageLoader,
     previous_build: CatalogBuild | None,
+    seed_embeddings: Mapping[str, ArrayLike] | None,
     batch_size: int,
 ) -> NDArray[np.float16]:
     expected_dim = None if previous_build is None else previous_build.embeddings.shape[1]
     previous_lookup: dict[str, int] = {}
     if previous_build is not None:
         previous_lookup = {row.key: index for index, row in enumerate(previous_build.rows)}
+    seed_lookup, expected_dim = _validate_seed_embeddings(
+        rows,
+        seed_embeddings=seed_embeddings,
+        expected_dim=expected_dim,
+    )
     slots: list[NDArray[np.float16] | None] = [None] * len(rows)
     pending_indexes: list[int] = []
     for index, row in enumerate(rows):
+        seed_embedding = seed_lookup.get(row.key)
+        if seed_embedding is not None:
+            slots[index] = seed_embedding.astype(np.float16, copy=True)
+            continue
         previous_index = previous_lookup.get(row.key)
         if previous_index is None:
             pending_indexes.append(index)
@@ -834,24 +848,79 @@ def _validate_embedding_batch(
     expected_dim: int | None,
 ) -> NDArray[np.float32]:
     embeddings = np.asarray(payload, dtype=np.float32)
+    return _validate_embedding_array(
+        embeddings,
+        expected_rows=expected_rows,
+        expected_dim=expected_dim,
+        source_name="embedder",
+    )
+
+
+def _validate_seed_embeddings(
+    rows: Sequence[RecognitionRow],
+    seed_embeddings: Mapping[str, ArrayLike] | None,
+    expected_dim: int | None,
+) -> tuple[dict[str, NDArray[np.float32]], int | None]:
+    if seed_embeddings is None:
+        return {}, expected_dim
+    row_keys = {row.key for row in rows}
+    unknown_keys = sorted(set(seed_embeddings).difference(row_keys))
+    if unknown_keys:
+        raise ValidationError(f"seed_embeddings contain unknown keys: {unknown_keys}")
+    validated: dict[str, NDArray[np.float32]] = {}
+    current_dim = expected_dim
+    for key, raw_embedding in seed_embeddings.items():
+        embedding = np.asarray(raw_embedding, dtype=np.float32)
+        validated_embedding = _validate_embedding_array(
+            embedding,
+            expected_rows=1,
+            expected_dim=current_dim,
+            source_name=f"seed_embeddings[{key!r}]",
+        )[0]
+        if current_dim is None:
+            current_dim = int(validated_embedding.shape[0])
+        validated[key] = validated_embedding
+    return validated, current_dim
+
+
+def _validate_embedding_array(
+    embeddings: NDArray[np.float32],
+    expected_rows: int,
+    expected_dim: int | None,
+    source_name: str,
+) -> NDArray[np.float32]:
+    if embeddings.ndim == 1:
+        embeddings = embeddings.reshape(1, -1)
     if embeddings.ndim != 2:
-        raise ValidationError("embedder must return a 2D array-like batch")
+        raise ValidationError(_embedding_error(source_name, "must be a 1D or 2D array-like batch"))
     if embeddings.shape[0] != expected_rows:
         raise ValidationError(
-            f"embedder returned {embeddings.shape[0]} rows but expected {expected_rows}"
+            _embedding_error(
+                source_name,
+                f"returned {embeddings.shape[0]} rows but expected {expected_rows}",
+            )
         )
     if embeddings.shape[1] <= 0:
-        raise ValidationError("embedder returned zero-dimensional embeddings")
+        raise ValidationError(_embedding_error(source_name, "returned zero-dimensional embeddings"))
     if expected_dim is not None and embeddings.shape[1] != expected_dim:
         raise ValidationError(
-            f"embedder returned dimension {embeddings.shape[1]} but expected {expected_dim}"
+            _embedding_error(
+                source_name,
+                f"returned dimension {embeddings.shape[1]} but expected {expected_dim}",
+            )
         )
     if not np.isfinite(embeddings).all():
-        raise ValidationError("embeddings must contain only finite values")
+        raise ValidationError(
+            _embedding_error(source_name, "embeddings must contain only finite values")
+        )
     norms = np.linalg.norm(embeddings, axis=1)
     if not np.allclose(norms, 1.0, atol=5e-3):
-        raise ValidationError("embeddings must be L2-normalized")
+        raise ValidationError(_embedding_error(source_name, "embeddings must be L2-normalized"))
     return embeddings
+
+
+def _embedding_error(source_name: str, message: str) -> str:
+    return message if source_name == "embedder" else f"{source_name} {message}"
 
 
 def _build_deltas(

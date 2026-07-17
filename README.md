@@ -44,17 +44,20 @@ python -m pip install -e .
 python -m pip install onnxruntime \
   "collectorvision[hf] @ git+https://github.com/HanClinto/CollectorVision.git@9d45a37ebfe40f22ece70507015645de134dc3ec"
 
-python scripts/update_catalogs.py \
+COLLECTORVISION_PROVIDER=cpu python scripts/seed_scryfall.py \
   --version catalog-v2-YYYY-MM-DD \
-  --allow-full-rebuild \
-  --image-dir /path/to/scryfall/images
+  --cache-root /path/to/ccg_card_id/catalog
 ```
 
-The updater uses cached files named with the source ID, including the existing
-`<scryfall-id>_back` convention. Missing files are downloaded temporarily.
-After reviewing `release/update-summary.json`, publish every file in `release/`
-to a release with the same version tag. The scheduled workflow will use that
-release as its incremental base.
+That command is a preflight and does not download images or run inference.
+Review its staleness and cache coverage counts, then repeat it with `--build`
+and an explicit `--max-downloads` no lower than the reported requirement. The
+seed builder reads the existing sharded `scryfall/images/png/front|back` cache,
+refreshes stale files with bounded concurrency, and writes downloads back
+atomically. After reviewing `release/seed-summary.json`, publish every file in
+`release/` to a release with the same version tag. The scheduled workflow will
+use that release as its incremental base and abort before downloading when an
+upstream refresh exceeds the configured safety limit.
 
 See [the Catalog v2 protocol](docs/catalog-v2.md) for the artifact and update
 design.

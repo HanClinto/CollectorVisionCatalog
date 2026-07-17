@@ -61,6 +61,18 @@ def test_normalize_scryfall_card_faces_and_secondary_ids() -> None:
     }
 
 
+def test_scryfall_image_revision_changes_fingerprint() -> None:
+    card = {
+        "id": "card-123",
+        "name": "Sample Card",
+        "image_uris": {"png": "https://cards.scryfall.io/png/front/a/b/card.png?100"},
+    }
+    first = normalize_scryfall_card(card)[0]
+    card["image_uris"]["png"] = "https://cards.scryfall.io/png/front/a/b/card.png?200"
+    second = normalize_scryfall_card(card)[0]
+    assert first.image_fingerprint != second.image_fingerprint
+
+
 def test_normalize_tcgcsv_product_images_and_filtering() -> None:
     category = {"categoryId": 10, "name": "Pokemon Singles"}
     group = {"groupId": 20, "name": "Base Set"}

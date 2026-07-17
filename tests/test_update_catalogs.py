@@ -2,8 +2,11 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import os
 import sys
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -79,6 +82,35 @@ def test_local_first_image_loader_uses_front_and_back_cache_names(tmp_path: Path
     finally:
         front_image.close()
         back_image.close()
+
+
+def test_scryfall_cache_resolves_sharded_face_and_revision(tmp_path: Path) -> None:
+    images_root = tmp_path / "scryfall" / "images" / "png"
+    (images_root / "front").mkdir(parents=True)
+    (images_root / "back").mkdir()
+    row = make_row("https://cards.scryfall.io/png/front/c/a/card-1.png?123")
+    path = images_root / "front" / "c" / "a" / "card-1.png"
+    path.parent.mkdir(parents=True)
+    Image.new("RGB", (2, 2), (255, 0, 0)).save(path)
+    os.utime(path, (123, 123))
+
+    cache = updater.ScryfallImageCache(tmp_path, [row])
+    assert cache.path_for_row(row) == path
+    assert cache.is_current(row)
+    image = cache(row.image_url)
+    try:
+        assert image.getpixel((0, 0)) == (255, 0, 0)
+    finally:
+        image.close()
+
+
+def test_changed_row_budget_counts_updates_additions_and_removals() -> None:
+    alpha = make_row()
+    beta = replace(alpha, key="scryfall:card-2:face:0")
+    previous = SimpleNamespace(rows=(alpha, beta))
+    changed_alpha = replace(alpha, image_fingerprint="changed")
+    added = replace(alpha, key="scryfall:card-3:face:0")
+    assert updater._count_changed_image_rows([changed_alpha, added], previous) == 3
 
 
 def test_build_requires_seed_unless_full_rebuild_is_explicit(tmp_path: Path) -> None:

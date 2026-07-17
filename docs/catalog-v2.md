@@ -146,8 +146,17 @@ The MTG adapter uses Scryfall bulk data. Each available face is a separate
 recognition row. Scryfall card UUIDs are primary IDs; Oracle and TCGplayer IDs
 are secondary IDs.
 
-Image fingerprints are based only on fields that identify the source image.
-Metadata-only changes do not invalidate embeddings.
+Image fingerprints include Scryfall's image revision timestamp. A revised
+source image therefore invalidates its embedding. Metadata-only changes do not
+invalidate embeddings. Automated updates have a changed-row safety budget and
+abort before downloads when an unexpectedly broad upstream refresh requires a
+reviewed local rebuild.
+
+Local seed builds use the persistent `ccg_card_id` Scryfall cache. Cache paths
+are resolved directly from the card ID and face rather than by scanning the
+full cache. URL timestamps are compared with local file modification times.
+Stale and missing files are refreshed with bounded concurrency and written
+atomically before inference.
 
 ### TCGCSV
 

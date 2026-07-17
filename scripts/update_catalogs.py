@@ -3,12 +3,14 @@ from __future__ import annotations
 
 import argparse
 import gzip
+import io
 import json
 import os
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
 from PIL import Image
@@ -39,6 +41,7 @@ class CatalogConfig:
     key: str
     source: dict[str, Any]
     embedding_model: str
+    max_changed_rows: int
     enabled: bool
     seed_required: bool
 
@@ -69,6 +72,10 @@ def load_config(path: Path) -> list[CatalogConfig]:
                 source=source,
                 embedding_model=_required_text(
                     raw.get("embedding_model"), f"catalog {key!r} embedding_model"
+                ),
+                max_changed_rows=_non_negative_int(
+                    raw.get("max_changed_rows", 5000),
+                    f"catalog {key!r} max_changed_rows",
                 ),
                 enabled=bool(raw.get("enabled", False)),
                 seed_required=bool(raw.get("seed_required", True)),
@@ -112,6 +119,8 @@ def fetch_scryfall_rows(source: dict[str, Any]) -> list[RecognitionRow]:
                     raise ValidationError(
                         f"invalid Scryfall JSONL at line {line_number}: {error}"
                     ) from error
+                if source.get("paper_only", False) and "paper" not in card.get("games", []):
+                    continue
                 if languages and card.get("lang") not in languages:
                     continue
                 rows.extend(normalize_scryfall_card(card))
@@ -128,6 +137,7 @@ def build_enabled_catalogs(
     version: str,
     allow_full_rebuild: bool = False,
     image_dirs: Sequence[Path] = (),
+    cache_root: Path | None = None,
     batch_size: int = 16,
     source_rows_factory: Callable[[dict[str, Any]], list[RecognitionRow]] | None = None,
     embedder_factory: Callable[[str, int], Embedder] | None = None,
@@ -159,7 +169,19 @@ def build_enabled_catalogs(
             )
 
         rows = source_rows_factory(config.source)
-        effective_image_loader = image_loader or local_first_image_loader(rows, image_dirs)
+        if previous is not None:
+            changed_rows = _count_changed_image_rows(rows, previous)
+            if changed_rows > config.max_changed_rows:
+                raise ValidationError(
+                    f"catalog {config.key!r} has {changed_rows:,} image changes, exceeding "
+                    f"its safety limit of {config.max_changed_rows:,}; run a reviewed local rebuild"
+                )
+        if image_loader is not None:
+            effective_image_loader = image_loader
+        elif cache_root is not None:
+            effective_image_loader = ScryfallImageCache(cache_root, rows)
+        else:
+            effective_image_loader = local_first_image_loader(rows, image_dirs)
         build = build_catalog(
             rows,
             embedder=embedder_factory(config.embedding_model, batch_size),
@@ -264,6 +286,90 @@ def local_first_image_loader(
     return load
 
 
+class ScryfallImageCache:
+    def __init__(self, cache_root: Path, rows: Iterable[RecognitionRow]) -> None:
+        self.images_root = _resolve_scryfall_images_root(cache_root)
+        self._entries = {
+            row.image_url: (
+                self.path_for_row(row),
+                scryfall_image_revision(row.image_url),
+            )
+            for row in rows
+        }
+
+    def path_for_row(self, row: RecognitionRow) -> Path:
+        face = "back" if row.face.is_back else "front"
+        card_id = row.primary_id.value
+        return self.images_root / face / card_id[0] / card_id[1] / f"{card_id}.png"
+
+    def is_current(self, row: RecognitionRow) -> bool:
+        path = self.path_for_row(row)
+        revision = scryfall_image_revision(row.image_url)
+        return path.is_file() and (
+            revision == 0 or abs(path.stat().st_mtime - revision) < 1.0
+        )
+
+    def __call__(self, image_url: str) -> Image.Image:
+        try:
+            path, revision = self._entries[image_url]
+        except KeyError as error:
+            raise ValidationError(
+                f"image URL is not part of this Scryfall build: {image_url}"
+            ) from error
+        if path.is_file() and (
+            revision == 0 or abs(path.stat().st_mtime - revision) < 1.0
+        ):
+            return _open_rgb_image(path)
+
+        request = Request(
+            image_url,
+            headers={"User-Agent": USER_AGENT, "Accept": "image/*"},
+        )
+        with urlopen(request, timeout=60) as response:
+            payload = response.read()
+        with Image.open(io.BytesIO(payload)) as image:
+            image.verify()
+
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_name(f".{path.name}.tmp-{os.getpid()}")
+        try:
+            temporary.write_bytes(payload)
+            os.replace(temporary, path)
+            if revision:
+                os.utime(path, (revision, revision))
+        finally:
+            temporary.unlink(missing_ok=True)
+        return _open_rgb_image(path)
+
+
+def scryfall_image_revision(image_url: str) -> int:
+    query = urlparse(image_url).query
+    return int(query) if query.isdecimal() else 0
+
+
+def _resolve_scryfall_images_root(cache_root: Path) -> Path:
+    root = cache_root.expanduser().resolve()
+    candidates = [
+        root / "scryfall" / "images" / "png",
+        root / "images" / "png",
+        root / "png",
+        root,
+    ]
+    for candidate in candidates:
+        if (candidate / "front").is_dir() and (candidate / "back").is_dir():
+            return candidate
+    raise ValidationError(
+        f"could not find Scryfall front/back image cache beneath {cache_root}"
+    )
+
+
+def _open_rgb_image(path: Path) -> Image.Image:
+    with Image.open(path) as image:
+        loaded = image.convert("RGB")
+        loaded.load()
+    return loaded
+
+
 def _read_json_url(url: str) -> dict[str, Any]:
     request = Request(
         url,
@@ -276,10 +382,33 @@ def _read_json_url(url: str) -> dict[str, Any]:
     return payload
 
 
+def _count_changed_image_rows(
+    rows: Sequence[RecognitionRow],
+    previous: CatalogBuild,
+) -> int:
+    previous_fingerprints = {
+        row.key: row.image_fingerprint
+        for row in previous.rows
+    }
+    changed_or_added = sum(
+        previous_fingerprints.get(row.key) != row.image_fingerprint
+        for row in rows
+    )
+    current_keys = {row.key for row in rows}
+    removed = len(set(previous_fingerprints).difference(current_keys))
+    return changed_or_added + removed
+
+
 def _required_text(value: Any, name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValidationError(f"{name} must be a non-empty string")
     return value.strip()
+
+
+def _non_negative_int(value: Any, name: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
+        raise ValidationError(f"{name} must be a non-negative integer")
+    return value
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
@@ -290,6 +419,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--version", required=True)
     parser.add_argument("--allow-full-rebuild", action="store_true")
     parser.add_argument("--image-dir", type=Path, action="append", default=[])
+    parser.add_argument("--cache-root", type=Path, default=None)
     parser.add_argument("--batch-size", type=int, default=16)
     return parser.parse_args(argv)
 
@@ -303,6 +433,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         version=args.version,
         allow_full_rebuild=args.allow_full_rebuild,
         image_dirs=args.image_dir,
+        cache_root=args.cache_root,
         batch_size=args.batch_size,
     )
     print(json.dumps(summary, indent=2, sort_keys=True))

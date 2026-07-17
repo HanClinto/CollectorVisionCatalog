@@ -60,6 +60,15 @@ def _read_gzip_jsonl(path: Path) -> list[dict[str, object]]:
     return [json.loads(line) for line in payload.splitlines()]
 
 
+def _normalized_embedding_for_color(color: tuple[int, int, int]) -> np.ndarray:
+    embedding = np.array(
+        [color[0] / 255.0, color[1] / 255.0, color[2] / 255.0, 0.5],
+        dtype=np.float32,
+    )
+    embedding /= np.linalg.norm(embedding)
+    return embedding
+
+
 def test_build_outputs_are_deterministic_and_loadable(workspace: Path) -> None:
     rows = [
         make_row(
@@ -188,6 +197,129 @@ def test_reuses_previous_embeddings_on_metadata_only_change(workspace: Path) -> 
     assert loader.calls == []
     assert len(delta.operations) == 0
     assert len(delta.metadata_operations) == 1
+
+
+def test_seed_embeddings_reuse_initial_rows_and_keep_artifacts_valid(workspace: Path) -> None:
+    rows = [
+        make_row("alpha", "memory://alpha", "fp-alpha", metadata={"name": "Alpha"}),
+        make_row("beta", "memory://beta", "fp-beta", metadata={"name": "Beta"}),
+    ]
+    image_map = {
+        "memory://alpha": (255, 0, 0),
+        "memory://beta": (0, 255, 0),
+    }
+    embedder = TrackingEmbedder()
+    loader = TrackingImageLoader(image_map)
+    build = build_catalog(
+        rows,
+        embedder=embedder,
+        image_loader=loader,
+        output_dir=workspace / "seeded",
+        catalog_key=CATALOG_KEY,
+        version="v1",
+        embedding_model=EMBEDDING_MODEL,
+        seed_embeddings={"alpha": _normalized_embedding_for_color(image_map["memory://alpha"])},
+    )
+
+    manifest_path = workspace / "seeded" / manifest_filename_for_catalog(CATALOG_KEY)
+    loaded = validate_artifacts(manifest_path)
+    reconstructed = apply_delta(None, manifest_path)
+    delta = load_delta_bundle(manifest_path)
+
+    assert loader.calls == ["memory://beta"]
+    assert embedder.calls == [[(0, 255, 0)]]
+    assert build.manifest.previous_version is None
+    assert build.manifest.delta.base_version is None
+    assert len(delta.operations) == 2
+    assert delta.embeddings.shape == (2, 4)
+    assert np.array_equal(loaded.embeddings, reconstructed.embeddings)
+    assert loaded.rows == reconstructed.rows
+    assert np.allclose(
+        loaded.embeddings[0].astype(np.float32),
+        _normalized_embedding_for_color(image_map["memory://alpha"]),
+        atol=1e-3,
+    )
+
+
+def test_seed_embeddings_reject_unknown_keys(workspace: Path) -> None:
+    rows = [make_row("alpha", "memory://alpha", "fp-alpha")]
+
+    with pytest.raises(ValidationError, match="seed_embeddings contain unknown keys"):
+        build_catalog(
+            rows,
+            embedder=TrackingEmbedder(),
+            image_loader=TrackingImageLoader({"memory://alpha": (255, 0, 0)}),
+            output_dir=workspace / "unknown-seed",
+            catalog_key=CATALOG_KEY,
+            version="v1",
+            embedding_model=EMBEDDING_MODEL,
+            seed_embeddings={"beta": _normalized_embedding_for_color((255, 0, 0))},
+        )
+
+
+@pytest.mark.parametrize(
+    ("seed_embeddings", "message"),
+    [
+        (
+            {"alpha": np.array([np.nan, 0.0, 0.0, 0.0], dtype=np.float32)},
+            "seed_embeddings\\['alpha'\\] embeddings must contain only finite values",
+        ),
+        (
+            {"alpha": np.ones(4, dtype=np.float32)},
+            "seed_embeddings\\['alpha'\\] embeddings must be L2-normalized",
+        ),
+        (
+            {
+                "alpha": _normalized_embedding_for_color((255, 0, 0)),
+                "beta": np.array([1.0, 0.0, 0.0], dtype=np.float32),
+            },
+            "seed_embeddings\\['beta'\\] returned dimension 3 but expected 4",
+        ),
+    ],
+)
+def test_seed_embeddings_reject_invalid_vectors(
+    workspace: Path,
+    seed_embeddings: dict[str, np.ndarray],
+    message: str,
+) -> None:
+    rows = [
+        make_row("alpha", "memory://alpha", "fp-alpha"),
+        make_row("beta", "memory://beta", "fp-beta"),
+    ]
+
+    with pytest.raises(ValidationError, match=message):
+        build_catalog(
+            rows,
+            embedder=TrackingEmbedder(),
+            image_loader=TrackingImageLoader(
+                {"memory://alpha": (255, 0, 0), "memory://beta": (0, 255, 0)}
+            ),
+            output_dir=workspace / "invalid-seed",
+            catalog_key=CATALOG_KEY,
+            version="v1",
+            embedding_model=EMBEDDING_MODEL,
+            seed_embeddings=seed_embeddings,
+        )
+
+
+def test_seed_embeddings_cannot_be_combined_with_previous_build(workspace: Path) -> None:
+    rows = [make_row("alpha", "memory://alpha", "fp-alpha", metadata={"name": "Alpha"})]
+    image_map = {"memory://alpha": (255, 0, 0)}
+    _, build_dir, _, _ = _build_initial_catalog(workspace, rows, image_map)
+    previous = load_catalog_build(build_dir / manifest_filename_for_catalog(CATALOG_KEY))
+
+    with pytest.raises(ValidationError, match="seed_embeddings cannot be combined"):
+        build_catalog(
+            rows,
+            embedder=TrackingEmbedder(),
+            image_loader=TrackingImageLoader(image_map),
+            output_dir=workspace / "seed-plus-previous",
+            catalog_key=CATALOG_KEY,
+            version="v2",
+            embedding_model=EMBEDDING_MODEL,
+            seed_embeddings={"alpha": _normalized_embedding_for_color((255, 0, 0))},
+            previous_build=previous,
+        )
 
 
 def test_state_only_change_reuses_embedding_and_roundtrips_delta(workspace: Path) -> None:
