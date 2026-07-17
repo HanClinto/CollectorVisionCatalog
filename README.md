@@ -59,5 +59,19 @@ atomically. After reviewing `release/seed-summary.json`, publish every file in
 use that release as its incremental base and abort before downloading when an
 upstream refresh exceeds the configured safety limit.
 
+The eight existing TCGplayer catalogs can be migrated separately while reusing
+legacy Milo embeddings for existing product images:
+
+```bash
+COLLECTORVISION_PROVIDER=cpu python scripts/seed_tcgplayer.py \
+  --version catalog-v2-YYYY-MM-DD \
+  --cache-root /path/to/ccg_card_id/catalog \
+  --legacy-dir /path/to/ccg_card_id/catalog/tcgplayer/collectorvision
+```
+
+This is also a preflight by default. New products and additional faces are
+downloaded from the CDN and embedded only after `--build` and a reviewed
+`--max-downloads` are supplied. Existing legacy product images remain untouched.
+
 See [the Catalog v2 protocol](docs/catalog-v2.md) for the artifact and update
 design.

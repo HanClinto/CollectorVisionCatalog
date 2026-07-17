@@ -16,7 +16,7 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from collectorvision_catalog import Face, PrimaryID, RecognitionRow  # noqa: E402
+from collectorvision_catalog import PrimaryID, RecognitionRow  # noqa: E402
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -99,15 +99,13 @@ def make_row(
     primary_value: str | None = None,
     secondary_ids: dict[str, str] | None = None,
     face_index: int = 0,
-    face_name: str | None = None,
-    is_back: bool = False,
     metadata: dict[str, object] | None = None,
 ) -> RecognitionRow:
     return RecognitionRow(
         key=key,
         primary_id=PrimaryID(namespace=namespace, value=primary_value or key),
         secondary_ids=secondary_ids or {},
-        face=Face(index=face_index, name=face_name or key, is_back=is_back),
+        face_index=face_index,
         image_url=image_url,
         image_fingerprint=image_fingerprint,
         metadata=metadata,

@@ -17,56 +17,56 @@
       "key": "milo1/tcgplayer/magic-the-gathering",
       "source": {"type": "tcgcsv", "category_id": 1},
       "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
-      "enabled": false,
+      "enabled": true,
       "seed_required": true
     },
     {
       "key": "milo1/tcgplayer/yugioh",
       "source": {"type": "tcgcsv", "category_id": 2},
       "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
-      "enabled": false,
+      "enabled": true,
       "seed_required": true
     },
     {
       "key": "milo1/tcgplayer/pokemon",
       "source": {"type": "tcgcsv", "category_id": 3},
       "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
-      "enabled": false,
+      "enabled": true,
       "seed_required": true
     },
     {
       "key": "milo1/tcgplayer/flesh-and-blood",
       "source": {"type": "tcgcsv", "category_id": 62},
       "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
-      "enabled": false,
+      "enabled": true,
       "seed_required": true
     },
     {
       "key": "milo1/tcgplayer/digimon-card-game",
       "source": {"type": "tcgcsv", "category_id": 63},
       "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
-      "enabled": false,
+      "enabled": true,
       "seed_required": true
     },
     {
       "key": "milo1/tcgplayer/one-piece",
       "source": {"type": "tcgcsv", "category_id": 68},
       "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
-      "enabled": false,
+      "enabled": true,
       "seed_required": true
     },
     {
       "key": "milo1/tcgplayer/lorcana",
       "source": {"type": "tcgcsv", "category_id": 71},
       "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
-      "enabled": false,
+      "enabled": true,
       "seed_required": true
     },
     {
       "key": "milo1/tcgplayer/star-wars-unlimited",
       "source": {"type": "tcgcsv", "category_id": 79},
       "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
-      "enabled": false,
+      "enabled": true,
       "seed_required": true
     },
     {

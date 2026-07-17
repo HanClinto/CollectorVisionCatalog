@@ -4,7 +4,7 @@ from collections.abc import Callable, Mapping
 from hashlib import sha256
 from typing import Any
 
-from ..artifacts import Face, PrimaryID, RecognitionRow, ValidationError
+from ..artifacts import PrimaryID, RecognitionRow, ValidationError
 
 
 def normalize_tcgcsv_product(
@@ -24,8 +24,10 @@ def normalize_tcgcsv_product(
     product_name = _require_string(_lookup(product, "name", "productName"), "name")
     image_count_raw = _lookup(product, "imageCount", "image_count")
     image_count = int(image_count_raw) if image_count_raw is not None else 1
-    if image_count <= 0:
-        raise ValidationError("tcgcsv imageCount must be positive")
+    if image_count == 0:
+        return []
+    if image_count < 0:
+        raise ValidationError("tcgcsv imageCount must not be negative")
     extended_data = extract_extended_data(product)
     secondary_ids: dict[str, str] = {}
     if group is not None:
@@ -37,6 +39,8 @@ def normalize_tcgcsv_product(
         if category_id is not None:
             secondary_ids["tcgplayer_category"] = str(category_id)
     metadata: dict[str, Any] = {"name": product_name}
+    if modified_on := _lookup(product, "modifiedOn", "modified_on"):
+        metadata["modified_on"] = str(modified_on)
     if group is not None and (group_name := _lookup(group, "name", "groupName")) is not None:
         metadata["set"] = str(group_name)
     if (
@@ -62,13 +66,11 @@ def normalize_tcgcsv_product(
                 key=f"tcgplayer:{product_id}:face:{index}",
                 primary_id=PrimaryID(namespace="tcgplayer", value=product_id),
                 secondary_ids=dict(sorted(secondary_ids.items())),
-                face=Face(
-                    index=index,
-                    name=product_name if index == 0 else f"{product_name} image {index + 1}",
-                    is_back=index > 0,
-                ),
+                face_index=index,
                 image_url=image_url,
-                image_fingerprint=_fingerprint(image_url),
+                image_fingerprint=_fingerprint(
+                    f"{image_url}|{_lookup(product, 'modifiedOn', 'modified_on') or ''}"
+                ),
                 metadata=dict(metadata),
             )
         )

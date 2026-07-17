@@ -61,18 +61,15 @@ A recognition record has this logical shape:
     "scryfall_oracle": "11111111-1111-1111-1111-111111111111",
     "tcgplayer_product": "12345"
   },
-  "face": {
-    "index": 1,
-    "name": "Back Face",
-    "is_back": true
-  }
+  "face_index": 1
 }
 ```
 
 `key` identifies an embedding row and is stable across releases. `primary_id`
 identifies the source card or product. Secondary IDs are namespaced and
-optional. `face` is always an object, so recognition results can return
-`face.is_back` without encoding face semantics into an ID.
+optional. `face_index` is omitted for front faces and defaults to `0`; `1`
+identifies the back face. Genuine per-face names belong in optional metadata,
+not recognition records.
 
 The browser can keep the embedding matrix packed as FP16 and convert values
 during dot products. For the current MTG catalog, gzip-compressed FP16 is about
@@ -166,8 +163,11 @@ day, sends a descriptive user agent, and respects TCGCSV's request guidance.
 TCGplayer product IDs are primary IDs; category and group IDs are secondary
 IDs.
 
-The first implementation supports the product lines tracked by `tcgjson`.
-Prices are not downloaded.
+The seed migrates the eight existing Milo catalogs without refreshing their
+legacy front images. Existing product embeddings are reused; only new products
+and additional faces use freshly downloaded images. TCGCSV `modifiedOn` values
+are part of image fingerprints so revisions after the v2 baseline trigger
+incremental embedding updates. Prices are not downloaded.
 
 ## Compatibility and rollout
 

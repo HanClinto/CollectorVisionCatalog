@@ -4,14 +4,14 @@ from collections.abc import Mapping
 from hashlib import sha256
 from typing import Any
 
-from ..artifacts import Face, PrimaryID, RecognitionRow, ValidationError
+from ..artifacts import PrimaryID, RecognitionRow, ValidationError
 
 _IMAGE_PREFERENCE = ("png", "large", "normal")
 
 
 def normalize_scryfall_card(card: Mapping[str, Any]) -> list[RecognitionRow]:
     card_id = _require_string(card.get("id"), "id")
-    name = _require_string(card.get("name"), "name")
+    _require_string(card.get("name"), "name")
     secondary_ids = {
         field_name: str(value)
         for field_name, source_name in (
@@ -48,14 +48,7 @@ def normalize_scryfall_card(card: Mapping[str, Any]) -> list[RecognitionRow]:
                     key=f"scryfall:{card_id}:face:{index}",
                     primary_id=PrimaryID(namespace="scryfall", value=card_id),
                     secondary_ids=dict(sorted(secondary_ids.items())),
-                    face=Face(
-                        index=index,
-                        name=_require_string(
-                            face_payload.get("name") or name,
-                            f"card_faces[{index}].name",
-                        ),
-                        is_back=index > 0,
-                    ),
+                    face_index=index,
                     image_url=image_url,
                     image_fingerprint=_fingerprint(image_url),
                     metadata=dict(metadata),
@@ -71,7 +64,7 @@ def normalize_scryfall_card(card: Mapping[str, Any]) -> list[RecognitionRow]:
             key=f"scryfall:{card_id}:face:0",
             primary_id=PrimaryID(namespace="scryfall", value=card_id),
             secondary_ids=dict(sorted(secondary_ids.items())),
-            face=Face(index=0, name=name, is_back=False),
+            face_index=0,
             image_url=image_url,
             image_fingerprint=_fingerprint(image_url),
             metadata=metadata,

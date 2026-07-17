@@ -7,7 +7,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from collectorvision_catalog import Face, PrimaryID, RecognitionRow
+from collectorvision_catalog import PrimaryID, RecognitionRow
 
 SCRIPT_PATH = Path(__file__).parents[1] / "scripts" / "seed_scryfall.py"
 SPEC = importlib.util.spec_from_file_location("seed_scryfall", SCRIPT_PATH)
@@ -22,7 +22,7 @@ def make_row(card_id: str, revision: int) -> RecognitionRow:
         key=f"scryfall:{card_id}:face:0",
         primary_id=PrimaryID("scryfall", card_id),
         secondary_ids={},
-        face=Face(index=0, name=card_id, is_back=False),
+        face_index=0,
         image_url=f"https://cards.scryfall.io/png/front/a/b/{card_id}.png?{revision}",
         image_fingerprint=f"fp-{revision}",
         metadata={"name": card_id},

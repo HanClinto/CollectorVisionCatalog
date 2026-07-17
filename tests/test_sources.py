@@ -41,8 +41,10 @@ def test_normalize_scryfall_card_faces_and_secondary_ids() -> None:
     rows = normalize_scryfall_card(card)
 
     assert [row.key for row in rows] == ["scryfall:card-123:face:0", "scryfall:card-123:face:1"]
-    assert rows[0].face.is_back is False
-    assert rows[1].face.is_back is True
+    assert rows[0].face_index == 0
+    assert rows[1].face_index == 1
+    assert "face_index" not in rows[0].minimal_record()
+    assert rows[1].minimal_record()["face_index"] == 1
     assert rows[0].image_url == "https://img/front.png"
     assert rows[1].image_url == "https://img/back-large.png"
     assert rows[0].secondary_ids == {
@@ -96,8 +98,7 @@ def test_normalize_tcgcsv_product_images_and_filtering() -> None:
         "https://tcgplayer-cdn.tcgplayer.com/product/123456_1_in_1000x1000.jpg",
     ]
     assert [row.image_url for row in rows] == build_tcgplayer_image_urls("123456", 2)
-    assert rows[1].face.is_back is True
-    assert rows[1].face.name == "Charizard image 2"
+    assert rows[1].face_index == 1
     assert rows[0].secondary_ids == {
         "tcgplayer_category": "10",
         "tcgplayer_group": "20",
@@ -120,3 +121,27 @@ def test_normalize_tcgcsv_product_images_and_filtering() -> None:
     }
     assert is_probable_card_product(not_a_card) is False
     assert normalize_tcgcsv_product(not_a_card, group=group, category=category) == []
+
+
+def test_tcgcsv_product_revision_changes_image_fingerprint() -> None:
+    product = {
+        "productId": 123456,
+        "name": "Charizard",
+        "modifiedOn": "2026-05-01T00:00:00",
+        "extendedData": [{"name": "Number", "value": "4/102"}],
+    }
+    first = normalize_tcgcsv_product(product)[0]
+    product["modifiedOn"] = "2026-05-02T00:00:00"
+    second = normalize_tcgcsv_product(product)[0]
+    assert first.image_fingerprint != second.image_fingerprint
+    assert second.metadata["modified_on"] == "2026-05-02T00:00:00"
+
+
+def test_tcgcsv_product_without_images_is_skipped() -> None:
+    product = {
+        "productId": 123456,
+        "name": "Unavailable Card",
+        "imageCount": 0,
+        "extendedData": [{"name": "Number", "value": "1"}],
+    }
+    assert normalize_tcgcsv_product(product) == []

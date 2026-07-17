@@ -5,14 +5,16 @@ import json
 import os
 import sys
 from dataclasses import replace
+from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
+from urllib.error import HTTPError
 
 import numpy as np
 import pytest
 from PIL import Image
 
-from collectorvision_catalog import Face, PrimaryID, RecognitionRow, ValidationError
+from collectorvision_catalog import PrimaryID, RecognitionRow, ValidationError
 
 SCRIPT_PATH = Path(__file__).parents[1] / "scripts" / "update_catalogs.py"
 SPEC = importlib.util.spec_from_file_location("update_catalogs", SCRIPT_PATH)
@@ -46,7 +48,7 @@ def make_row(image_url: str = "memory://front") -> RecognitionRow:
         key="scryfall:card-1:face:0",
         primary_id=PrimaryID("scryfall", "card-1"),
         secondary_ids={"scryfall_oracle": "oracle-1"},
-        face=Face(index=0, name="Card", is_back=False),
+        face_index=0,
         image_url=image_url,
         image_fingerprint="fingerprint-1",
         metadata={"name": "Card"},
@@ -68,7 +70,7 @@ def test_local_first_image_loader_uses_front_and_back_cache_names(tmp_path: Path
         key="scryfall:card-1:face:1",
         primary_id=front.primary_id,
         secondary_ids=front.secondary_ids,
-        face=Face(index=1, name="Back", is_back=True),
+        face_index=1,
         image_url="https://example.test/back",
         image_fingerprint="fingerprint-2",
         metadata={"name": "Card"},
@@ -102,6 +104,78 @@ def test_scryfall_cache_resolves_sharded_face_and_revision(tmp_path: Path) -> No
         assert image.getpixel((0, 0)) == (255, 0, 0)
     finally:
         image.close()
+
+
+def test_tcgplayer_cache_resolves_sharded_product_image(tmp_path: Path) -> None:
+    images_root = tmp_path / "tcgplayer" / "images" / "product"
+    path = images_root / "1" / "2" / "12345.jpg"
+    path.parent.mkdir(parents=True)
+    Image.new("RGB", (2, 2), (255, 0, 0)).save(path)
+    row = RecognitionRow(
+        key="tcgplayer:12345:face:0",
+        primary_id=PrimaryID("tcgplayer", "12345"),
+        secondary_ids={},
+        face_index=0,
+        image_url="https://tcgplayer-cdn.tcgplayer.com/product/12345_in_1000x1000.jpg",
+        image_fingerprint="fingerprint",
+        metadata={"name": "Card"},
+    )
+
+    cache = updater.TCGplayerImageCache(tmp_path, [row])
+    assert cache.path_for_row(row) == path
+    assert cache.is_cached(row)
+    image = cache(row.image_url)
+    try:
+        assert image.getpixel((0, 0)) == (254, 0, 0)
+    finally:
+        image.close()
+
+    path.write_bytes(b"")
+    assert not cache.is_cached(row)
+
+
+def test_tcgplayer_download_falls_back_to_second_suffix(monkeypatch: pytest.MonkeyPatch) -> None:
+    requested: list[str] = []
+
+    def fake_urlopen(request: object, timeout: int) -> BytesIO:
+        url = request.full_url
+        requested.append(url)
+        if "_1_in_" in url:
+            raise HTTPError(url, 403, "Forbidden", {}, None)
+        return BytesIO(b"alternate")
+
+    monkeypatch.setattr(updater, "urlopen", fake_urlopen)
+    payload = updater._download_tcgplayer_image(
+        "https://tcgplayer-cdn.tcgplayer.com/product/123_1_in_1000x1000.jpg",
+        attempts=1,
+    )
+    assert payload == b"alternate"
+    assert requested == [
+        "https://tcgplayer-cdn.tcgplayer.com/product/123_1_in_1000x1000.jpg",
+        "https://tcgplayer-cdn.tcgplayer.com/product/123_2_in_1000x1000.jpg",
+    ]
+
+
+def test_tcgplayer_download_falls_back_to_first_suffix(monkeypatch: pytest.MonkeyPatch) -> None:
+    requested: list[str] = []
+
+    def fake_urlopen(request: object, timeout: int) -> BytesIO:
+        url = request.full_url
+        requested.append(url)
+        if "_1_in_" not in url:
+            raise HTTPError(url, 403, "Forbidden", {}, None)
+        return BytesIO(b"alternate")
+
+    monkeypatch.setattr(updater, "urlopen", fake_urlopen)
+    payload = updater._download_tcgplayer_image(
+        "https://tcgplayer-cdn.tcgplayer.com/product/123_in_1000x1000.jpg",
+        attempts=1,
+    )
+    assert payload == b"alternate"
+    assert requested == [
+        "https://tcgplayer-cdn.tcgplayer.com/product/123_in_1000x1000.jpg",
+        "https://tcgplayer-cdn.tcgplayer.com/product/123_1_in_1000x1000.jpg",
+    ]
 
 
 def test_changed_row_budget_counts_updates_additions_and_removals() -> None:

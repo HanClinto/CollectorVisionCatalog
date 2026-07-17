@@ -68,30 +68,6 @@ class PrimaryID:
 
 
 @dataclass(frozen=True)
-class Face:
-    index: int
-    name: str
-    is_back: bool
-
-    def to_dict(self) -> dict[str, Any]:
-        return {"index": self.index, "name": self.name, "is_back": self.is_back}
-
-    @classmethod
-    def from_dict(cls, payload: Mapping[str, Any]) -> Face:
-        index = payload.get("index")
-        if not isinstance(index, int) or index < 0:
-            raise ValidationError("face.index must be a non-negative integer")
-        is_back = payload.get("is_back")
-        if not isinstance(is_back, bool):
-            raise ValidationError("face.is_back must be a boolean")
-        return cls(
-            index=index,
-            name=_require_non_empty_string(payload.get("name"), "face.name"),
-            is_back=is_back,
-        )
-
-
-@dataclass(frozen=True)
 class StateRecord:
     key: str
     image_url: str
@@ -121,18 +97,20 @@ class RecognitionRow:
     key: str
     primary_id: PrimaryID
     secondary_ids: dict[str, str]
-    face: Face
+    face_index: int
     image_url: str
     image_fingerprint: str
     metadata: dict[str, JSONValue] | None = None
 
     def minimal_record(self) -> dict[str, Any]:
-        return {
+        record = {
             "key": self.key,
             "primary_id": self.primary_id.to_dict(),
             "secondary_ids": dict(sorted(self.secondary_ids.items())),
-            "face": self.face.to_dict(),
         }
+        if self.face_index:
+            record["face_index"] = self.face_index
+        return record
 
     def metadata_record(self) -> dict[str, Any] | None:
         if self.metadata is None:
@@ -151,7 +129,7 @@ class RecognitionRow:
             key=self.key,
             primary_id=self.primary_id,
             secondary_ids=dict(self.secondary_ids),
-            face=self.face,
+            face_index=self.face_index,
             image_url=self.image_url,
             image_fingerprint=self.image_fingerprint,
             metadata=metadata,
@@ -178,7 +156,13 @@ class RecognitionRow:
                 "secondary_ids",
             ).items()
         }
-        face = Face.from_dict(_require_mapping(minimal_payload.get("face"), "face"))
+        face_index = minimal_payload.get("face_index", 0)
+        if (
+            not isinstance(face_index, int)
+            or isinstance(face_index, bool)
+            or face_index < 0
+        ):
+            raise ValidationError("face_index must be a non-negative integer")
         state = (
             state_payload
             if isinstance(state_payload, StateRecord)
@@ -193,7 +177,7 @@ class RecognitionRow:
             key=key,
             primary_id=primary_id,
             secondary_ids=dict(sorted(secondary_ids.items())),
-            face=face,
+            face_index=face_index,
             image_url=state.image_url,
             image_fingerprint=state.image_fingerprint,
             metadata=normalized_metadata,
