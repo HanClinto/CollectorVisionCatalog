@@ -18,6 +18,7 @@ from collectorvision_catalog import (
     validate_artifacts,
     write_catalog_index,
 )
+from collectorvision_catalog.quality import apply_quality_rules, load_quality_rules
 
 _UPDATER = runpy.run_path(str(Path(__file__).with_name("update_catalogs.py")))
 ScryfallImageCache = _UPDATER["ScryfallImageCache"]
@@ -105,6 +106,7 @@ def refresh_seed_cache(
 def build_seed(
     *,
     config_path: Path,
+    quality_overrides_path: Path,
     cache_root: Path,
     output_dir: Path,
     version: str,
@@ -122,12 +124,19 @@ def build_seed(
         raise ValidationError("seed requires exactly one enabled Scryfall catalog")
     config = configs[0]
     rows = fetch_scryfall_rows(config.source)
+    quality_result = apply_quality_rules(
+        rows,
+        source_type="scryfall",
+        rules=load_quality_rules(quality_overrides_path),
+    )
+    rows = list(quality_result.rows)
     image_cache = ScryfallImageCache(cache_root, rows)
     plan = create_seed_plan(rows, image_cache)
     summary: dict[str, Any] = {
         "catalog_key": config.key,
         "version": version,
         **plan.summary(),
+        "quality_excluded_rows": len(quality_result.findings),
     }
     print(json.dumps(summary, indent=2, sort_keys=True))
     if not build:
@@ -162,12 +171,29 @@ def build_seed(
         json.dumps(summary, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    (output_dir / "quality-report.json").write_text(
+        json.dumps(
+            {
+                "version": version,
+                "catalogs": {config.key: quality_result.report()},
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     return summary
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=Path("config/catalogs.json"))
+    parser.add_argument(
+        "--quality-overrides",
+        type=Path,
+        default=Path("config/source-quality-overrides.json"),
+    )
     parser.add_argument("--cache-root", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, default=Path("release"))
     parser.add_argument("--version", required=True)
@@ -191,6 +217,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     build_seed(
         config_path=args.config,
+        quality_overrides_path=args.quality_overrides,
         cache_root=args.cache_root,
         output_dir=args.output_dir,
         version=args.version,

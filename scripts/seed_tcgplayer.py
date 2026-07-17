@@ -21,6 +21,7 @@ from collectorvision_catalog import (
     validate_artifacts,
     write_catalog_index,
 )
+from collectorvision_catalog.quality import apply_quality_rules, load_quality_rules
 
 _UPDATER = runpy.run_path(str(Path(__file__).with_name("update_catalogs.py")))
 TCGplayerImageCache = _UPDATER["TCGplayerImageCache"]
@@ -158,6 +159,7 @@ def refresh_inference_images(
 def build_seed(
     *,
     config_path: Path,
+    quality_overrides_path: Path,
     cache_root: Path,
     legacy_dir: Path,
     output_dir: Path,
@@ -178,9 +180,18 @@ def build_seed(
 
     plans: list[TCGplayerSeedPlan] = []
     model_ids: set[str] = set()
+    quality_reports: dict[str, Any] = {}
+    quality_rules = load_quality_rules(quality_overrides_path)
     for catalog_key, legacy_key in LEGACY_CATALOG_KEYS.items():
         config = configs_by_key[catalog_key]
         rows = fetch_tcgcsv_rows(config.source)
+        quality_result = apply_quality_rules(
+            rows,
+            source_type="tcgcsv",
+            rules=quality_rules,
+        )
+        rows = list(quality_result.rows)
+        quality_reports[catalog_key] = quality_result.report()
         legacy_embeddings = load_legacy_embeddings(legacy_dir, legacy_key)
         image_cache = TCGplayerImageCache(cache_root, rows)
         known_unavailable = {
@@ -205,6 +216,9 @@ def build_seed(
         "embeddings_to_compute": sum(len(plan.inference_rows) for plan in plans),
         "legacy_embeddings_reused": sum(len(plan.seed_embeddings) for plan in plans),
         "current_rows": sum(len(plan.rows) for plan in plans),
+        "quality_excluded_rows": sum(
+            report["excluded_rows"] for report in quality_reports.values()
+        ),
     }
     print(json.dumps(summary, indent=2, sort_keys=True), flush=True)
     if not build:
@@ -271,12 +285,26 @@ def build_seed(
         json.dumps(summary, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
+    (output_dir / "quality-report.json").write_text(
+        json.dumps(
+            {"version": version, "catalogs": quality_reports},
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
     return summary
 
 
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=Path("config/catalogs.json"))
+    parser.add_argument(
+        "--quality-overrides",
+        type=Path,
+        default=Path("config/source-quality-overrides.json"),
+    )
     parser.add_argument("--cache-root", type=Path, required=True)
     parser.add_argument("--legacy-dir", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, default=Path("tcgplayer-release"))
@@ -301,6 +329,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     build_seed(
         config_path=args.config,
+        quality_overrides_path=args.quality_overrides,
         cache_root=args.cache_root,
         legacy_dir=args.legacy_dir,
         output_dir=args.output_dir,

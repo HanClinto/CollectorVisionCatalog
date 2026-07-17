@@ -135,6 +135,21 @@ For each configured source/game/model tuple:
 If no valid previous release exists, the job requires an explicit seed input
 instead of silently attempting a full hosted-run rebuild.
 
+### Source image quality
+
+Source records may be valid while their images are unsuitable for recognition,
+including placeholders, text overlays, watermarks, and non-camera-true
+reference art. Versioned quality rules can approve, quarantine, or reject rows
+by source, category, group, product, and face. Quarantined and rejected rows are
+removed before embedding and listed in `quality-report.json`; these decisions
+do not add fields to minimal recognition records.
+
+The initial rule quarantines all 303 image rows from the 302 products in
+TCGplayer Magic International Edition group 1527 because its references contain
+a large `Not Tournament Legal` annotation. Longer-term reviewed camera
+observations and replacement references are tracked in
+[issue #1](https://github.com/HanClinto/CollectorVisionCatalog/issues/1).
+
 ## Sources
 
 ### Scryfall

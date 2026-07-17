@@ -16,6 +16,11 @@ records with the previous release, downloads and embeds only new or changed
 images, reuses unchanged embeddings, and then publishes immutable gzip assets
 to a GitHub Release.
 
+Versioned rules in `config/source-quality-overrides.json` quarantine annotated,
+placeholder, or otherwise unsuitable source images before embedding. Builds
+emit `quality-report.json` with the affected row keys and reasons; quality data
+stays outside compact recognition records.
+
 ## Status
 
 Catalog v2 is under active development. CollectorVision Catalog v1 remains

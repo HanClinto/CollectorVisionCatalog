@@ -222,3 +222,5 @@ def test_full_build_writes_release_index_and_summary(tmp_path: Path) -> None:
         "milo1--scryfall--mtg.manifest.json"
     )
     assert json.loads((output_dir / "update-summary.json").read_text()) == summary
+    quality_report = json.loads((output_dir / "quality-report.json").read_text())
+    assert quality_report["catalogs"]["milo1/scryfall/mtg"]["excluded_rows"] == 0

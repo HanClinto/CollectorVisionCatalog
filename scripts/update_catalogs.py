@@ -30,6 +30,7 @@ from collectorvision_catalog import (
     write_catalog_index,
 )
 from collectorvision_catalog.artifacts import Embedder, ImageLoader, default_image_loader
+from collectorvision_catalog.quality import apply_quality_rules, load_quality_rules
 from collectorvision_catalog.sources.scryfall import normalize_scryfall_card
 from collectorvision_catalog.sources.tcgcsv import normalize_tcgcsv_product
 
@@ -189,6 +190,7 @@ def fetch_tcgcsv_rows(source: dict[str, Any]) -> list[RecognitionRow]:
 def build_enabled_catalogs(
     *,
     config_path: Path,
+    quality_overrides_path: Path = Path("config/source-quality-overrides.json"),
     previous_dir: Path,
     output_dir: Path,
     version: str,
@@ -207,6 +209,8 @@ def build_enabled_catalogs(
     output_dir.mkdir(parents=True, exist_ok=True)
     manifests: dict[str, Path] = {}
     summaries = []
+    quality_reports: dict[str, Any] = {}
+    quality_rules = load_quality_rules(quality_overrides_path)
 
     for config in configs:
         source_type = config.source.get("type")
@@ -229,6 +233,13 @@ def build_enabled_catalogs(
             )
 
         rows = effective_rows_factory(config.source)
+        quality_result = apply_quality_rules(
+            rows,
+            source_type=str(source_type),
+            rules=quality_rules,
+        )
+        rows = list(quality_result.rows)
+        quality_reports[config.key] = quality_result.report()
         if previous is not None:
             changed_rows = _count_changed_image_rows(rows, previous)
             if changed_rows > config.max_changed_rows:
@@ -297,6 +308,7 @@ def build_enabled_catalogs(
                 "changed": previous is None
                 or build.manifest.delta.operations > 0
                 or build.manifest.delta.metadata_operations > 0,
+                "quality_excluded_rows": len(quality_result.findings),
             }
         )
 
@@ -306,9 +318,21 @@ def build_enabled_catalogs(
         "version": version,
         "changed": any(item["changed"] for item in summaries),
         "catalogs": summaries,
+        "quality_excluded_rows": sum(
+            report["excluded_rows"] for report in quality_reports.values()
+        ),
     }
     (output_dir / "update-summary.json").write_text(
         json.dumps(summary, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    (output_dir / "quality-report.json").write_text(
+        json.dumps(
+            {"version": version, "catalogs": quality_reports},
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
         encoding="utf-8",
     )
     return summary
@@ -658,6 +682,11 @@ def _non_negative_int(value: Any, name: str) -> int:
 def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=Path("config/catalogs.json"))
+    parser.add_argument(
+        "--quality-overrides",
+        type=Path,
+        default=Path("config/source-quality-overrides.json"),
+    )
     parser.add_argument("--previous-dir", type=Path, default=Path("release-cache"))
     parser.add_argument("--output-dir", type=Path, default=Path("release"))
     parser.add_argument("--version", required=True)
@@ -672,6 +701,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     summary = build_enabled_catalogs(
         config_path=args.config,
+        quality_overrides_path=args.quality_overrides,
         previous_dir=args.previous_dir,
         output_dir=args.output_dir,
         version=args.version,

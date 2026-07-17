@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "rules": [
+    {
+      "id": "tcgplayer-mtg-international-edition-annotated",
+      "source_type": "tcgcsv",
+      "decision": "quarantine",
+      "match": {
+        "category_id": 1,
+        "group_id": 1527
+      },
+      "reason": "TCGplayer reference images contain a large Not Tournament Legal annotation and are not camera-true.",
+      "evidence": [
+        "https://github.com/HanClinto/CollectorVisionCatalog/issues/1",
+        "https://tcgcsv.com/tcgplayer/1/1527/products",
+        "https://www.tcgplayer.com/product/97095",
+        "https://www.tcgplayer.com/product/97103"
+      ]
+    }
+  ]
+}
