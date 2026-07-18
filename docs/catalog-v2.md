@@ -140,14 +140,16 @@ instead of silently attempting a full hosted-run rebuild.
 Source records may be valid while their images are unsuitable for recognition,
 including placeholders, text overlays, watermarks, and non-camera-true
 reference art. Versioned quality rules can approve, quarantine, or reject rows
-by source, category, group, product, and face. Quarantined and rejected rows are
-removed before embedding and listed in `quality-report.json`; these decisions
-do not add fields to minimal recognition records.
+by source, category, group, product, face, and metadata name pattern. Rules can
+exclude reviewed exceptions from a broader match. Quarantined and rejected rows
+are removed before embedding and listed in `quality-report.json`; these
+decisions do not add fields to minimal recognition records.
 
-The initial rule quarantines all 303 image rows from the 302 products in
-TCGplayer Magic International Edition group 1527 because its references contain
-a large `Not Tournament Legal` annotation. Longer-term reviewed camera
-observations and replacement references are tracked in
+Reviewed rules quarantine TCGplayer groups whose card images contain a large
+added `Not Tournament Legal` annotation. Magic World Championship biography,
+decklist, and blank inserts are preserved because their images do not contain
+the annotation. Longer-term reviewed camera observations and replacement
+references are tracked in
 [issue #1](https://github.com/HanClinto/CollectorVisionCatalog/issues/1).
 
 ## Sources

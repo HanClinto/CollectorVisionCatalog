@@ -54,9 +54,15 @@
         "category_id": 1,
         "group_id": 2198
       },
+      "exclude_matches": [
+        {
+          "name_regex": "(?i)(biography|decklist|blank) card$"
+        }
+      ],
       "reason": "TCGplayer reference images contain a large Not Tournament Legal annotation and are not camera-true.",
       "evidence": [
         "https://github.com/HanClinto/CollectorVisionCatalog/issues/1#issuecomment-5012041421",
+        "https://github.com/HanClinto/CollectorVisionCatalog/issues/1#issuecomment-5012446202",
         "https://tcgcsv.com/tcgplayer/1/2198/products"
       ]
     },

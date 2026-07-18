@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections import Counter
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -16,6 +17,7 @@ _MATCH_FIELDS = {
     "category_id",
     "group_id",
     "face_index",
+    "name_regex",
 }
 
 
@@ -25,6 +27,7 @@ class QualityRule:
     source_type: str
     decision: str
     match: dict[str, str | int]
+    exclude_matches: tuple[dict[str, str | int], ...]
     reason: str
     evidence: tuple[str, ...]
 
@@ -87,18 +90,16 @@ def load_quality_rules(path: Path) -> tuple[QualityRule, ...]:
             raise ValidationError(
                 f"quality rule {rule_id!r} decision must be one of {sorted(_DECISIONS)}"
             )
-        raw_match = raw.get("match")
-        if not isinstance(raw_match, Mapping) or not raw_match:
-            raise ValidationError(f"quality rule {rule_id!r} match must be a non-empty object")
-        unknown_fields = set(raw_match).difference(_MATCH_FIELDS)
-        if unknown_fields:
+        match = _parse_match(raw.get("match"), rule_id, "match")
+        raw_exclude_matches = raw.get("exclude_matches", [])
+        if not isinstance(raw_exclude_matches, list):
             raise ValidationError(
-                f"quality rule {rule_id!r} has unknown match fields: {sorted(unknown_fields)}"
+                f"quality rule {rule_id!r} exclude_matches must be a list"
             )
-        match = {
-            field: _normalize_match_value(field, value, rule_id)
-            for field, value in raw_match.items()
-        }
+        exclude_matches = tuple(
+            _parse_match(raw_exclude, rule_id, f"exclude_matches[{exclude_index}]")
+            for exclude_index, raw_exclude in enumerate(raw_exclude_matches)
+        )
         raw_evidence = raw.get("evidence", [])
         if not isinstance(raw_evidence, list):
             raise ValidationError(f"quality rule {rule_id!r} evidence must be a list")
@@ -111,6 +112,7 @@ def load_quality_rules(path: Path) -> tuple[QualityRule, ...]:
                 ),
                 decision=decision,
                 match=match,
+                exclude_matches=exclude_matches,
                 reason=_required_text(raw.get("reason"), f"quality rule {rule_id}.reason"),
                 evidence=tuple(
                     _required_text(item, f"quality rule {rule_id}.evidence")
@@ -154,6 +156,13 @@ def apply_quality_rules(
 
 
 def _matches(rule: QualityRule, row: RecognitionRow) -> bool:
+    return _matches_fields(rule.match, row) and not any(
+        _matches_fields(exclude_match, row)
+        for exclude_match in rule.exclude_matches
+    )
+
+
+def _matches_fields(match: Mapping[str, str | int], row: RecognitionRow) -> bool:
     values: dict[str, str | int | None] = {
         "primary_namespace": row.primary_id.namespace,
         "primary_id": row.primary_id.value,
@@ -161,7 +170,35 @@ def _matches(rule: QualityRule, row: RecognitionRow) -> bool:
         "group_id": row.secondary_ids.get("tcgplayer_group"),
         "face_index": row.face_index,
     }
-    return all(values[field] == expected for field, expected in rule.match.items())
+    for field, expected in match.items():
+        if field == "name_regex":
+            name = row.metadata.get("name")
+            if not isinstance(name, str) or re.search(str(expected), name) is None:
+                return False
+        elif values[field] != expected:
+            return False
+    return True
+
+
+def _parse_match(
+    raw_match: Any,
+    rule_id: str,
+    field_name: str,
+) -> dict[str, str | int]:
+    if not isinstance(raw_match, Mapping) or not raw_match:
+        raise ValidationError(
+            f"quality rule {rule_id!r} {field_name} must be a non-empty object"
+        )
+    unknown_fields = set(raw_match).difference(_MATCH_FIELDS)
+    if unknown_fields:
+        raise ValidationError(
+            f"quality rule {rule_id!r} {field_name} has unknown fields: "
+            f"{sorted(unknown_fields)}"
+        )
+    return {
+        field: _normalize_match_value(field, value, rule_id)
+        for field, value in raw_match.items()
+    }
 
 
 def _normalize_match_value(field: str, value: Any, rule_id: str) -> str | int:
@@ -171,7 +208,15 @@ def _normalize_match_value(field: str, value: Any, rule_id: str) -> str | int:
                 f"quality rule {rule_id!r} face_index must be a non-negative integer"
             )
         return value
-    return _required_text(str(value), f"quality rule {rule_id}.{field}")
+    normalized = _required_text(str(value), f"quality rule {rule_id}.{field}")
+    if field == "name_regex":
+        try:
+            re.compile(normalized)
+        except re.error as error:
+            raise ValidationError(
+                f"quality rule {rule_id!r} name_regex is invalid: {error}"
+            ) from error
+    return normalized
 
 
 def _required_text(value: Any, name: str) -> str:
