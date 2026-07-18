@@ -12,9 +12,94 @@
       "reason": "TCGplayer reference images contain a large Not Tournament Legal annotation and are not camera-true.",
       "evidence": [
         "https://github.com/HanClinto/CollectorVisionCatalog/issues/1",
+        "https://github.com/HanClinto/CollectorVisionCatalog/issues/1#issuecomment-5012041421",
         "https://tcgcsv.com/tcgplayer/1/1527/products",
         "https://www.tcgplayer.com/product/97095",
         "https://www.tcgplayer.com/product/97103"
+      ]
+    },
+    {
+      "id": "tcgplayer-mtg-collectors-edition-annotated",
+      "source_type": "tcgcsv",
+      "decision": "quarantine",
+      "match": {
+        "category_id": 1,
+        "group_id": 1526
+      },
+      "reason": "TCGplayer reference images contain a large Not Tournament Legal annotation and are not camera-true.",
+      "evidence": [
+        "https://github.com/HanClinto/CollectorVisionCatalog/issues/1#issuecomment-5012041421",
+        "https://tcgcsv.com/tcgplayer/1/1526/products"
+      ]
+    },
+    {
+      "id": "tcgplayer-mtg-30th-anniversary-annotated",
+      "source_type": "tcgcsv",
+      "decision": "quarantine",
+      "match": {
+        "category_id": 1,
+        "group_id": 17666
+      },
+      "reason": "TCGplayer reference images contain a large Not Tournament Legal annotation and are not camera-true.",
+      "evidence": [
+        "https://github.com/HanClinto/CollectorVisionCatalog/issues/1#issuecomment-5012041421",
+        "https://tcgcsv.com/tcgplayer/1/17666/products"
+      ]
+    },
+    {
+      "id": "tcgplayer-mtg-world-championship-decks-annotated",
+      "source_type": "tcgcsv",
+      "decision": "quarantine",
+      "match": {
+        "category_id": 1,
+        "group_id": 2198
+      },
+      "reason": "TCGplayer reference images contain a large Not Tournament Legal annotation and are not camera-true.",
+      "evidence": [
+        "https://github.com/HanClinto/CollectorVisionCatalog/issues/1#issuecomment-5012041421",
+        "https://tcgcsv.com/tcgplayer/1/2198/products"
+      ]
+    },
+    {
+      "id": "tcgplayer-pokemon-world-championship-decks-annotated",
+      "source_type": "tcgcsv",
+      "decision": "quarantine",
+      "match": {
+        "category_id": 3,
+        "group_id": 2282
+      },
+      "reason": "TCGplayer reference images contain a large Not Tournament Legal annotation and are not camera-true.",
+      "evidence": [
+        "https://github.com/HanClinto/CollectorVisionCatalog/issues/1#issuecomment-5012041421",
+        "https://tcgcsv.com/tcgplayer/3/2282/products"
+      ]
+    },
+    {
+      "id": "tcgplayer-mtg-thorn-elemental-media-promo-annotated",
+      "source_type": "tcgcsv",
+      "decision": "quarantine",
+      "match": {
+        "primary_namespace": "tcgplayer",
+        "primary_id": "283412"
+      },
+      "reason": "TCGplayer added a Not Tournament Legal annotation that is not present on the physical card.",
+      "evidence": [
+        "https://github.com/HanClinto/CollectorVisionCatalog/issues/1#issuecomment-5012041421",
+        "https://www.tcgplayer.com/product/283412"
+      ]
+    },
+    {
+      "id": "tcgplayer-mtg-counterspell-playtest-annotated",
+      "source_type": "tcgcsv",
+      "decision": "quarantine",
+      "match": {
+        "primary_namespace": "tcgplayer",
+        "primary_id": "522720"
+      },
+      "reason": "TCGplayer added a Not Tournament Legal annotation that is not present on the physical card.",
+      "evidence": [
+        "https://github.com/HanClinto/CollectorVisionCatalog/issues/1#issuecomment-5012041421",
+        "https://www.tcgplayer.com/product/522720"
       ]
     }
   ]
