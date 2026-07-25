@@ -202,6 +202,21 @@ def test_tcgplayer_cache_resolves_sharded_product_image(tmp_path: Path) -> None:
     assert not cache.is_cached(row)
 
 
+def test_image_caches_create_canonical_roots(tmp_path: Path) -> None:
+    scryfall_root = tmp_path / "new-scryfall-cache"
+    assert updater._resolve_scryfall_images_root(scryfall_root) == (
+        scryfall_root / "scryfall" / "images" / "png"
+    )
+    assert (scryfall_root / "scryfall" / "images" / "png" / "front").is_dir()
+    assert (scryfall_root / "scryfall" / "images" / "png" / "back").is_dir()
+
+    tcgplayer_root = tmp_path / "new-tcgplayer-cache"
+    assert updater._resolve_tcgplayer_images_root(tcgplayer_root) == (
+        tcgplayer_root / "tcgplayer" / "images" / "product"
+    )
+    assert (tcgplayer_root / "tcgplayer" / "images" / "product").is_dir()
+
+
 def test_image_cache_rejects_unsafe_source_identifiers(tmp_path: Path) -> None:
     images_root = tmp_path / "scryfall" / "images" / "png"
     (images_root / "front").mkdir(parents=True)

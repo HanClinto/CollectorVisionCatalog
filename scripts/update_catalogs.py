@@ -833,8 +833,9 @@ def scryfall_image_revision(image_url: str) -> int:
 
 def _resolve_scryfall_images_root(cache_root: Path) -> Path:
     root = cache_root.expanduser().resolve()
+    canonical = root / "scryfall" / "images" / "png"
     candidates = [
-        root / "scryfall" / "images" / "png",
+        canonical,
         root / "images" / "png",
         root / "png",
         root,
@@ -842,23 +843,24 @@ def _resolve_scryfall_images_root(cache_root: Path) -> Path:
     for candidate in candidates:
         if (candidate / "front").is_dir() and (candidate / "back").is_dir():
             return candidate
-    raise ValidationError(
-        f"could not find Scryfall front/back image cache beneath {cache_root}"
-    )
+    (canonical / "front").mkdir(parents=True, exist_ok=True)
+    (canonical / "back").mkdir(parents=True, exist_ok=True)
+    return canonical
 
 
 def _resolve_tcgplayer_images_root(cache_root: Path) -> Path:
     root = cache_root.expanduser().resolve()
+    canonical = root / "tcgplayer" / "images" / "product"
     candidates = [
-        root / "tcgplayer" / "images" / "product",
+        canonical,
         root / "images" / "product",
         root / "product",
-        root,
     ]
     for candidate in candidates:
         if candidate.is_dir():
             return candidate
-    raise ValidationError(f"could not find TCGplayer image cache beneath {cache_root}")
+    canonical.mkdir(parents=True, exist_ok=True)
+    return canonical
 
 
 def _open_rgb_image(path: Path) -> Image.Image:
