@@ -121,6 +121,7 @@ jobs:
           python scripts/update_catalogs.py \
             --previous-dir release-cache \
             --output-dir release \
+            --cache-root data-cache \
             --version "${{ steps.release.outputs.version }}" \
             --expected-source-revisions source-status.json
 

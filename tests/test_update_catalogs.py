@@ -271,6 +271,35 @@ def test_tcgplayer_download_falls_back_to_first_suffix(monkeypatch: pytest.Monke
     ]
 
 
+def test_refresh_tcgplayer_images_excludes_only_unavailable_rows() -> None:
+    available = RecognitionRow(
+        key="tcgplayer:1:face:0",
+        identifiers={"tcgplayer_product": "1"},
+        face_index=0,
+        image_url="memory://available",
+        image_fingerprint="available",
+    )
+    unavailable = replace(
+        available,
+        key="tcgplayer:2:face:0",
+        identifiers={"tcgplayer_product": "2"},
+        image_url="memory://unavailable",
+    )
+
+    class Cache:
+        def __call__(self, image_url: str) -> Image.Image:
+            if image_url == unavailable.image_url:
+                raise updater.TCGplayerImageUnavailable("missing")
+            return Image.new("RGB", (2, 2))
+
+    assert updater.refresh_tcgplayer_images(
+        [available, unavailable],
+        Cache(),
+        workers=2,
+        catalog_key="demo/tcgplayer",
+    ) == {unavailable.key}
+
+
 def test_changed_row_budget_counts_updates_additions_and_removals() -> None:
     alpha = make_row()
     beta = replace(alpha, key="scryfall:card-2:face:0")

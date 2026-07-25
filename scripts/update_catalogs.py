@@ -10,7 +10,7 @@ import re
 import time
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -388,6 +388,41 @@ def build_enabled_catalogs(
         rows = list(quality_result.rows)
         quality_reports[config.key] = quality_result.report()
         quality_reports[config.key]["source_revision"] = snapshot.revision.to_dict()
+        unavailable_keys: set[str] = set()
+        if source_type == "tcgcsv" and cache_root is not None:
+            availability_cache = TCGplayerImageCache(cache_root, rows)
+            unavailable_keys = {
+                row.key for row in rows if availability_cache.is_temporarily_unavailable(row)
+            }
+            rows = [row for row in rows if row.key not in unavailable_keys]
+            previous_fingerprints = (
+                {}
+                if previous is None
+                else {row.key: row.image_fingerprint for row in previous.rows}
+            )
+            refresh_rows = [
+                row
+                for row in rows
+                if previous_fingerprints.get(row.key) != row.image_fingerprint
+            ]
+            if refresh_rows:
+                refresh_cache = TCGplayerImageCache(
+                    cache_root,
+                    rows,
+                    refresh_urls=(row.image_url for row in refresh_rows),
+                )
+                newly_unavailable = refresh_tcgplayer_images(
+                    refresh_rows,
+                    refresh_cache,
+                    workers=_non_negative_int(
+                        config.source.get("image_workers", 8),
+                        f"catalog {config.key!r} image_workers",
+                    ),
+                    catalog_key=config.key,
+                )
+                unavailable_keys.update(newly_unavailable)
+                rows = [row for row in rows if row.key not in newly_unavailable]
+            quality_reports[config.key]["source_unavailable_rows"] = len(unavailable_keys)
         if previous is not None:
             changed_rows = _count_changed_image_rows(rows, previous)
             if changed_rows > config.max_changed_rows:
@@ -460,6 +495,7 @@ def build_enabled_catalogs(
                 or build.manifest.delta.operations > 0
                 or build.manifest.delta.metadata_operations > 0,
                 "quality_excluded_rows": len(quality_result.findings),
+                "source_unavailable_rows": len(unavailable_keys),
                 "source_revision": snapshot.revision.to_dict(),
             }
         )
@@ -583,6 +619,42 @@ def tcgplayer_network_image_loader(image_url: str) -> Image.Image:
         loaded = image.convert("RGB")
         loaded.load()
     return loaded
+
+
+def refresh_tcgplayer_images(
+    rows: Sequence[RecognitionRow],
+    image_cache: TCGplayerImageCache,
+    *,
+    workers: int,
+    catalog_key: str,
+) -> set[str]:
+    if workers <= 0:
+        raise ValidationError("image workers must be positive")
+    unavailable_keys: set[str] = set()
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(image_cache, row.image_url): row
+            for row in rows
+        }
+        try:
+            for future in as_completed(futures):
+                row = futures[future]
+                try:
+                    image = future.result()
+                except TCGplayerImageUnavailable:
+                    unavailable_keys.add(row.key)
+                    continue
+                image.close()
+        except BaseException:
+            for future in futures:
+                future.cancel()
+            raise
+    if unavailable_keys:
+        print(
+            f"{catalog_key}: excluding {len(unavailable_keys):,} unavailable source images",
+            flush=True,
+        )
+    return unavailable_keys
 
 
 class ScryfallImageCache:
