@@ -29,35 +29,89 @@ jobs:
           python -m pip install onnxruntime \
             "collectorvision[hf] @ git+https://github.com/HanClinto/CollectorVision.git@9d45a37ebfe40f22ece70507015645de134dc3ec"
 
-      - name: Resolve previous v2 release
+      - name: Capture configured source revisions
+        run: |
+          python scripts/assemble_release.py source-status \
+            --output source-status.json
+
+      - name: Resolve previous beta release
         id: previous
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           mkdir -p release-cache
-          if tag="$(gh release list --repo "$GITHUB_REPOSITORY" \
-            --limit 1 --json tagName --jq '.[0].tagName // empty')" && [ -n "$tag" ]; then
+          releases="$(gh release list --repo "$GITHUB_REPOSITORY" \
+            --limit 1000 --json tagName,isDraft,isPrerelease)"
+          RELEASES="$releases" python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          import os
+          import re
+          from pathlib import Path
+
+          pattern = re.compile(r"^catalog-v2-beta\.(\d+)-(\d{4}-\d{2}-\d{2})$")
+          releases = json.loads(os.environ["RELEASES"])
+          tags = [
+              item["tagName"]
+              for item in releases
+              if item["tagName"].startswith("catalog-v2-beta.")
+          ]
+          malformed = sorted(tag for tag in tags if pattern.fullmatch(tag) is None)
+          if malformed:
+              raise SystemExit(
+                  "Malformed non-draft Catalog v2 beta tag(s): " + ", ".join(malformed)
+              )
+          published = [
+              item
+              for item in releases
+              if not item["isDraft"] and pattern.fullmatch(item["tagName"])
+          ]
+          non_prerelease = sorted(
+              item["tagName"] for item in published if not item["isPrerelease"]
+          )
+          if non_prerelease:
+              raise SystemExit(
+                  "Catalog v2 beta tag(s) are not prereleases: " + ", ".join(non_prerelease)
+              )
+          numbered = [
+              (int(pattern.fullmatch(item["tagName"]).group(1)), item["tagName"])
+              for item in published
+          ]
+          reserved_numbers = [int(pattern.fullmatch(tag).group(1)) for tag in tags]
+          prior = max(numbered, default=None)
+          next_number = max(reserved_numbers, default=0) + 1
+          source_status = json.loads(Path("source-status.json").read_text())
+          source_date = source_status["suggested_date_suffix"]
+          print(f"available={'false' if prior is None else 'true'}")
+          if prior is not None:
+              print(f"tag={prior[1]}")
+          Path(".previous-beta-tag").write_text("" if prior is None else prior[1])
+          print(f"next_tag=catalog-v2-beta.{next_number}-{source_date}")
+          PY
+          tag="$(<.previous-beta-tag)"
+          if [ -n "$tag" ]; then
             gh release download "$tag" \
               --repo "$GITHUB_REPOSITORY" \
               --dir release-cache
-            echo "available=true" >> "$GITHUB_OUTPUT"
-            echo "tag=$tag" >> "$GITHUB_OUTPUT"
-          else
-            echo "available=false" >> "$GITHUB_OUTPUT"
+            python scripts/assemble_release.py validate \
+              --release-dir release-cache \
+              --version "$tag"
           fi
 
       - name: Await seed release
         if: steps.previous.outputs.available != 'true'
         run: |
-          echo "::notice::No Catalog v2 seed release exists yet."
-          echo "Build the first release locally with --allow-full-rebuild and publish it."
+          echo "::notice::No Catalog v2 seed beta exists yet."
+          echo "Build Scryfall and TCGplayer seeds locally in distinct directories,"
+          echo "then run: python scripts/assemble_release.py assemble \\"
+          echo "  --input-dir scryfall-seed --input-dir tcgplayer-seed \\"
+          echo "  --output-dir release --version '${{ steps.previous.outputs.next_tag }}'"
 
       - name: Compute release version
         if: steps.previous.outputs.available == 'true'
         id: release
         run: |
-          echo "version=catalog-v2-$(date -u +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+          echo "version=${{ steps.previous.outputs.next_tag }}" >> "$GITHUB_OUTPUT"
 
       - name: Build incremental catalogs
         if: steps.previous.outputs.available == 'true'
@@ -67,7 +121,8 @@ jobs:
           python scripts/update_catalogs.py \
             --previous-dir release-cache \
             --output-dir release \
-            --version "${{ steps.release.outputs.version }}"
+            --version "${{ steps.release.outputs.version }}" \
+            --expected-source-revisions source-status.json
 
       - name: Check for changes
         if: steps.previous.outputs.available == 'true'
@@ -81,6 +136,14 @@ jobs:
           print(f"changed={'true' if summary['changed'] else 'false'}")
           PY
 
+      - name: Validate complete release
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          python scripts/assemble_release.py validate \
+            --release-dir release \
+            --version "${{ steps.release.outputs.version }}" \
+            --write-checksums
+
       - name: Publish immutable release
         if: steps.changes.outputs.changed == 'true'
         env:
@@ -88,6 +151,9 @@ jobs:
         run: |
           gh release create "${{ steps.release.outputs.version }}" \
             --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --prerelease \
+            --latest=false \
             --title "CollectorVision Catalog v2 ${{ steps.release.outputs.version }}" \
             --notes "Automated full snapshots and one-step deltas. Start with catalog-index-v2.json." \
             release/*

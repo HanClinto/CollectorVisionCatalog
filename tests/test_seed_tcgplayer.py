@@ -6,7 +6,7 @@ from pathlib import Path
 
 import numpy as np
 
-from collectorvision_catalog import PrimaryID, RecognitionRow
+from collectorvision_catalog import RecognitionRow
 
 SCRIPT_PATH = Path(__file__).parents[1] / "scripts" / "seed_tcgplayer.py"
 SPEC = importlib.util.spec_from_file_location("seed_tcgplayer", SCRIPT_PATH)
@@ -19,8 +19,7 @@ SPEC.loader.exec_module(seed)
 def make_row(product_id: str, modified_on: str, face_index: int = 0) -> RecognitionRow:
     return RecognitionRow(
         key=f"tcgplayer:{product_id}:face:{face_index}",
-        primary_id=PrimaryID("tcgplayer", product_id),
-        secondary_ids={},
+        identifiers={"tcgplayer_product": product_id},
         face_index=face_index,
         image_url=(
             f"https://tcgplayer-cdn.tcgplayer.com/product/{product_id}"
@@ -46,7 +45,7 @@ def test_seed_plan_reuses_all_legacy_fronts() -> None:
     class Cache:
         @staticmethod
         def is_cached(row: RecognitionRow) -> bool:
-            return row.primary_id.value != "new"
+            return row.identifiers["tcgplayer_product"] != "new"
 
     plan = seed.create_seed_plan(
         "milo1/tcgplayer/test",

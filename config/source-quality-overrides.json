@@ -85,8 +85,7 @@
       "source_type": "tcgcsv",
       "decision": "quarantine",
       "match": {
-        "primary_namespace": "tcgplayer",
-        "primary_id": "283412"
+        "identifiers": {"tcgplayer_product": "283412"}
       },
       "reason": "TCGplayer added a Not Tournament Legal annotation that is not present on the physical card.",
       "evidence": [
@@ -99,8 +98,7 @@
       "source_type": "tcgcsv",
       "decision": "quarantine",
       "match": {
-        "primary_namespace": "tcgplayer",
-        "primary_id": "522720"
+        "identifiers": {"tcgplayer_product": "522720"}
       },
       "reason": "TCGplayer added a Not Tournament Legal annotation that is not present on the physical card.",
       "evidence": [

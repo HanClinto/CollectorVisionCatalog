@@ -16,7 +16,30 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from collectorvision_catalog import PrimaryID, RecognitionRow  # noqa: E402
+from collectorvision_catalog import (  # noqa: E402
+    CatalogDescriptor,
+    RecognitionRow,
+    SourceRevision,
+)
+from collectorvision_catalog import (  # noqa: E402
+    build_catalog as _build_catalog,
+)
+
+TEST_DESCRIPTOR = CatalogDescriptor(
+    game="test-game",
+    source="test-source",
+    profile="printings",
+    description="Test catalog.",
+    result_identifier="test",
+    recommended=True,
+)
+TEST_SOURCE_REVISION = SourceRevision(
+    source_type="test",
+    source_name="fixture",
+    updated_at="2026-07-24T20:11:00Z",
+    uri="https://example.test/source",
+    identity="fixture-2026-07-24",
+)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -83,6 +106,12 @@ class UnnormalizedEmbedder:
         return np.ones((len(images), 3), dtype=np.float32)
 
 
+def build_test_catalog(*args, **kwargs):
+    kwargs.setdefault("descriptor", TEST_DESCRIPTOR)
+    kwargs.setdefault("source_revision", TEST_SOURCE_REVISION)
+    return _build_catalog(*args, **kwargs)
+
+
 def make_png_bytes(color: tuple[int, int, int]) -> bytes:
     image = Image.new("RGB", (2, 2), color)
     buffer = io.BytesIO()
@@ -97,14 +126,13 @@ def make_row(
     *,
     namespace: str = "test",
     primary_value: str | None = None,
-    secondary_ids: dict[str, str] | None = None,
+    identifiers: dict[str, str] | None = None,
     face_index: int = 0,
     metadata: dict[str, object] | None = None,
 ) -> RecognitionRow:
     return RecognitionRow(
         key=key,
-        primary_id=PrimaryID(namespace=namespace, value=primary_value or key),
-        secondary_ids=secondary_ids or {},
+        identifiers={namespace: primary_value or key, **(identifiers or {})},
         face_index=face_index,
         image_url=image_url,
         image_fingerprint=image_fingerprint,

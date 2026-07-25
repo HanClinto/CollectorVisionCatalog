@@ -4,7 +4,7 @@ from collections.abc import Callable, Mapping
 from hashlib import sha256
 from typing import Any
 
-from ..artifacts import PrimaryID, RecognitionRow, ValidationError
+from ..artifacts import RecognitionRow, ValidationError
 
 
 def normalize_tcgcsv_product(
@@ -20,7 +20,7 @@ def normalize_tcgcsv_product(
     raw_product_id = _lookup(product, "productId", "productID", "product_id")
     if raw_product_id is None:
         raise ValidationError("tcgcsv productId must be present")
-    product_id = _require_string(str(raw_product_id), "productId")
+    product_id = _require_positive_decimal(raw_product_id, "productId")
     product_name = _require_string(_lookup(product, "name", "productName"), "name")
     image_count_raw = _lookup(product, "imageCount", "image_count")
     image_count = int(image_count_raw) if image_count_raw is not None else 1
@@ -29,15 +29,15 @@ def normalize_tcgcsv_product(
     if image_count < 0:
         raise ValidationError("tcgcsv imageCount must not be negative")
     extended_data = extract_extended_data(product)
-    secondary_ids: dict[str, str] = {}
+    identifiers: dict[str, str] = {"tcgplayer_product": product_id}
     if group is not None:
         group_id = _lookup(group, "groupId", "groupID", "group_id")
         if group_id is not None:
-            secondary_ids["tcgplayer_group"] = str(group_id)
+            identifiers["tcgplayer_group"] = str(group_id)
     if category is not None:
         category_id = _lookup(category, "categoryId", "categoryID", "category_id")
         if category_id is not None:
-            secondary_ids["tcgplayer_category"] = str(category_id)
+            identifiers["tcgplayer_category"] = str(category_id)
     metadata: dict[str, Any] = {"name": product_name}
     if modified_on := _lookup(product, "modifiedOn", "modified_on"):
         metadata["modified_on"] = str(modified_on)
@@ -64,8 +64,7 @@ def normalize_tcgcsv_product(
         rows.append(
             RecognitionRow(
                 key=f"tcgplayer:{product_id}:face:{index}",
-                primary_id=PrimaryID(namespace="tcgplayer", value=product_id),
-                secondary_ids=dict(sorted(secondary_ids.items())),
+                identifiers=dict(sorted(identifiers.items())),
                 face_index=index,
                 image_url=image_url,
                 image_fingerprint=_fingerprint(
@@ -90,7 +89,7 @@ def build_tcgplayer_image_urls(
 ) -> list[str]:
     if image_count <= 0:
         raise ValidationError("image_count must be positive")
-    product_id_text = _require_string(str(product_id), "product_id")
+    product_id_text = _require_positive_decimal(product_id, "product_id")
     urls: list[str] = []
     for index in range(image_count):
         suffix = "" if index == 0 else f"_{index}"
@@ -157,3 +156,10 @@ def _require_string(value: Any, name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValidationError(f"tcgcsv {name} must be a non-empty string")
     return value.strip()
+
+
+def _require_positive_decimal(value: Any, name: str) -> str:
+    text = str(value)
+    if not text.isascii() or not text.isdecimal() or int(text) <= 0:
+        raise ValidationError(f"tcgcsv {name} must be a positive decimal integer")
+    return str(int(text))

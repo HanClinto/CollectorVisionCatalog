@@ -38,14 +38,14 @@ def test_group_quarantine_excludes_matching_rows(tmp_path: Path) -> None:
             "memory://1",
             "fp-1",
             namespace="tcgplayer",
-            secondary_ids={"tcgplayer_category": "1", "tcgplayer_group": "1527"},
+            identifiers={"tcgplayer_category": "1", "tcgplayer_group": "1527"},
         ),
         make_row(
             "tcgplayer:2:face:0",
             "memory://2",
             "fp-2",
             namespace="tcgplayer",
-            secondary_ids={"tcgplayer_category": "1", "tcgplayer_group": "2"},
+            identifiers={"tcgplayer_category": "1", "tcgplayer_group": "2"},
         ),
     ]
 
@@ -93,7 +93,7 @@ def test_group_quarantine_can_preserve_named_exceptions(tmp_path: Path) -> None:
             "memory://1",
             "fp-1",
             namespace="tcgplayer",
-            secondary_ids={"tcgplayer_category": "1", "tcgplayer_group": "2198"},
+            identifiers={"tcgplayer_category": "1", "tcgplayer_group": "2198"},
             metadata={"name": "1996 World Championship Blank Card"},
         ),
         make_row(
@@ -101,7 +101,7 @@ def test_group_quarantine_can_preserve_named_exceptions(tmp_path: Path) -> None:
             "memory://2",
             "fp-2",
             namespace="tcgplayer",
-            secondary_ids={"tcgplayer_category": "1", "tcgplayer_group": "2198"},
+            identifiers={"tcgplayer_category": "1", "tcgplayer_group": "2198"},
             metadata={"name": "Black Lotus - 1996"},
         ),
     ]
@@ -120,7 +120,7 @@ def test_conflicting_quality_decisions_are_rejected(tmp_path: Path) -> None:
     path = tmp_path / "quality.json"
     common = {
         "source_type": "tcgcsv",
-        "match": {"primary_id": "1"},
+        "match": {"identifiers": {"tcgplayer": "1"}},
         "reason": "reviewed",
     }
     write_rules(

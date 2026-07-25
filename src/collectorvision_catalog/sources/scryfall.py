@@ -3,24 +3,25 @@ from __future__ import annotations
 from collections.abc import Mapping
 from hashlib import sha256
 from typing import Any
+from uuid import UUID
 
-from ..artifacts import PrimaryID, RecognitionRow, ValidationError
+from ..artifacts import RecognitionRow, ValidationError
 
 _IMAGE_PREFERENCE = ("png", "large", "normal")
 
 
 def normalize_scryfall_card(card: Mapping[str, Any]) -> list[RecognitionRow]:
-    card_id = _require_string(card.get("id"), "id")
+    card_id = _require_uuid(card.get("id"), "id")
     _require_string(card.get("name"), "name")
-    secondary_ids = {
-        field_name: str(value)
-        for field_name, source_name in (
-            ("scryfall_oracle", "oracle_id"),
-            ("tcgplayer_product", "tcgplayer_id"),
-            ("tcgplayer_etched_product", "tcgplayer_etched_id"),
-        )
-        if (value := card.get(source_name)) not in (None, "")
-    }
+    identifiers = {"scryfall_card": card_id}
+    if (oracle_id := card.get("oracle_id")) not in (None, ""):
+        identifiers["scryfall_oracle"] = _require_uuid(oracle_id, "oracle_id")
+    for field_name, source_name in (
+        ("tcgplayer_product", "tcgplayer_id"),
+        ("tcgplayer_etched_product", "tcgplayer_etched_id"),
+    ):
+        if (value := card.get(source_name)) not in (None, ""):
+            identifiers[field_name] = _require_positive_decimal(value, source_name)
     metadata = {
         field: value
         for field in (
@@ -46,8 +47,7 @@ def normalize_scryfall_card(card: Mapping[str, Any]) -> list[RecognitionRow]:
             rows.append(
                 RecognitionRow(
                     key=f"scryfall:{card_id}:face:{index}",
-                    primary_id=PrimaryID(namespace="scryfall", value=card_id),
-                    secondary_ids=dict(sorted(secondary_ids.items())),
+                    identifiers=dict(sorted(identifiers.items())),
                     face_index=index,
                     image_url=image_url,
                     image_fingerprint=_fingerprint(image_url),
@@ -62,8 +62,7 @@ def normalize_scryfall_card(card: Mapping[str, Any]) -> list[RecognitionRow]:
     return [
         RecognitionRow(
             key=f"scryfall:{card_id}:face:0",
-            primary_id=PrimaryID(namespace="scryfall", value=card_id),
-            secondary_ids=dict(sorted(secondary_ids.items())),
+            identifiers=dict(sorted(identifiers.items())),
             face_index=0,
             image_url=image_url,
             image_fingerprint=_fingerprint(image_url),
@@ -90,3 +89,22 @@ def _require_string(value: Any, name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValidationError(f"scryfall {name} must be a non-empty string")
     return value.strip()
+
+
+def _require_uuid(value: Any, name: str) -> str:
+    text = _require_string(value, name)
+    try:
+        parsed = UUID(text)
+    except ValueError as error:
+        raise ValidationError(f"scryfall {name} must be a UUID") from error
+    canonical = str(parsed)
+    if text.lower() != canonical:
+        raise ValidationError(f"scryfall {name} must be a canonical UUID")
+    return canonical
+
+
+def _require_positive_decimal(value: Any, name: str) -> str:
+    text = str(value)
+    if not text.isascii() or not text.isdecimal() or int(text) <= 0:
+        raise ValidationError(f"scryfall {name} must be a positive decimal integer")
+    return str(int(text))

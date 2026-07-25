@@ -12,8 +12,7 @@ from .artifacts import RecognitionRow, ValidationError
 
 _DECISIONS = {"approve", "quarantine", "reject"}
 _MATCH_FIELDS = {
-    "primary_namespace",
-    "primary_id",
+    "identifiers",
     "category_id",
     "group_id",
     "face_index",
@@ -26,8 +25,8 @@ class QualityRule:
     rule_id: str
     source_type: str
     decision: str
-    match: dict[str, str | int]
-    exclude_matches: tuple[dict[str, str | int], ...]
+    match: dict[str, object]
+    exclude_matches: tuple[dict[str, object], ...]
     reason: str
     evidence: tuple[str, ...]
 
@@ -162,17 +161,18 @@ def _matches(rule: QualityRule, row: RecognitionRow) -> bool:
     )
 
 
-def _matches_fields(match: Mapping[str, str | int], row: RecognitionRow) -> bool:
+def _matches_fields(match: Mapping[str, object], row: RecognitionRow) -> bool:
     values: dict[str, str | int | None] = {
-        "primary_namespace": row.primary_id.namespace,
-        "primary_id": row.primary_id.value,
-        "category_id": row.secondary_ids.get("tcgplayer_category"),
-        "group_id": row.secondary_ids.get("tcgplayer_group"),
+        "category_id": row.identifiers.get("tcgplayer_category"),
+        "group_id": row.identifiers.get("tcgplayer_group"),
         "face_index": row.face_index,
     }
     for field, expected in match.items():
-        if field == "name_regex":
-            name = row.metadata.get("name")
+        if field == "identifiers":
+            if any(row.identifiers.get(name) != value for name, value in expected.items()):
+                return False
+        elif field == "name_regex":
+            name = (row.metadata or {}).get("name")
             if not isinstance(name, str) or re.search(str(expected), name) is None:
                 return False
         elif values[field] != expected:
@@ -184,7 +184,7 @@ def _parse_match(
     raw_match: Any,
     rule_id: str,
     field_name: str,
-) -> dict[str, str | int]:
+) -> dict[str, object]:
     if not isinstance(raw_match, Mapping) or not raw_match:
         raise ValidationError(
             f"quality rule {rule_id!r} {field_name} must be a non-empty object"
@@ -201,7 +201,18 @@ def _parse_match(
     }
 
 
-def _normalize_match_value(field: str, value: Any, rule_id: str) -> str | int:
+def _normalize_match_value(field: str, value: Any, rule_id: str) -> object:
+    if field == "identifiers":
+        if not isinstance(value, Mapping) or not value:
+            raise ValidationError(
+                f"quality rule {rule_id!r} identifiers must be a non-empty object"
+            )
+        return {
+            _required_text(key, f"quality rule {rule_id}.identifiers key"): _required_text(
+                identifier, f"quality rule {rule_id}.identifiers[{key!r}]"
+            )
+            for key, identifier in value.items()
+        }
     if field == "face_index":
         if not isinstance(value, int) or isinstance(value, bool) or value < 0:
             raise ValidationError(

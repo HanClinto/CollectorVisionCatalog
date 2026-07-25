@@ -4,11 +4,18 @@ import json
 from pathlib import Path
 
 import pytest
-from conftest import TrackingEmbedder, TrackingImageLoader, make_row
+from conftest import (
+    TrackingEmbedder,
+    TrackingImageLoader,
+    make_row,
+)
+from conftest import (
+    build_test_catalog as build_catalog,
+)
 
 from collectorvision_catalog import (
+    SourceRevision,
     ValidationError,
-    build_catalog,
     load_catalog_index,
     manifest_filename_for_catalog,
     write_catalog_index,
@@ -26,6 +33,13 @@ def test_catalog_index_roundtrip_is_deterministic(workspace: Path) -> None:
         catalog_key="demo/catalog",
         version="v1",
         embedding_model="milo1",
+        source_revision=SourceRevision(
+            source_type="test",
+            source_name="newer",
+            updated_at="2026-07-25T00:00:00Z",
+            uri="https://example.test/newer",
+            identity="newer",
+        ),
     )
     build_catalog(
         [make_row("beta", "memory://beta", "fp-beta", metadata={"name": "Beta"})],
@@ -50,6 +64,8 @@ def test_catalog_index_roundtrip_is_deterministic(workspace: Path) -> None:
     assert index_path_a.read_bytes() == index_path_b.read_bytes()
     assert loaded.to_dict() == index_a.to_dict() == index_b.to_dict()
     assert loaded.catalogs["demo/catalog"].manifest_filename == "demo--catalog.manifest.json"
+    assert loaded.catalogs["demo/catalog"].descriptor.profile == "printings"
+    assert loaded.source_updated_at == "2026-07-25T00:00:00Z"
     assert all("/" not in entry.manifest_filename for entry in loaded.catalogs.values())
 
 
@@ -73,3 +89,27 @@ def test_catalog_index_loader_rejects_nested_manifest_filename(workspace: Path) 
 
     with pytest.raises(ValidationError, match="flat filename"):
         load_catalog_index(index_path)
+
+
+def test_catalog_index_rejects_tampered_top_level_source_timestamp(workspace: Path) -> None:
+    build_dir = workspace / "build"
+    build_catalog(
+        [make_row("alpha", "memory://alpha", "fp-alpha")],
+        embedder=TrackingEmbedder(),
+        image_loader=TrackingImageLoader({"memory://alpha": (255, 0, 0)}),
+        output_dir=build_dir,
+        catalog_key="demo/catalog",
+        version="v1",
+        embedding_model="milo1",
+    )
+    path = workspace / "index.json"
+    write_catalog_index(
+        path,
+        "v1",
+        {"demo/catalog": build_dir / manifest_filename_for_catalog("demo/catalog")},
+    )
+    payload = json.loads(path.read_text())
+    payload["source_updated_at"] = "2026-07-25T00:00:00Z"
+    path.write_text(json.dumps(payload))
+    with pytest.raises(ValidationError, match="maximum catalog source timestamp"):
+        load_catalog_index(path)

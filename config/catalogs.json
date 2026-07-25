@@ -1,8 +1,16 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "catalogs": [
     {
       "key": "milo1/scryfall/mtg",
+      "descriptor": {
+        "game": "magic-the-gathering",
+        "source": "scryfall",
+        "profile": "printings",
+        "description": "English-first paper printings from Scryfall default cards.",
+        "result_identifier": "scryfall_card",
+        "recommended": true
+      },
       "source": {
         "type": "scryfall",
         "bulk_type": "default_cards",
@@ -14,7 +22,53 @@
       "seed_required": true
     },
     {
+      "key": "milo1/scryfall/mtg-cards",
+      "descriptor": {
+        "game": "magic-the-gathering",
+        "source": "scryfall",
+        "profile": "cards",
+        "description": "One representative printing per Oracle card for lightweight recognition.",
+        "result_identifier": "scryfall_card"
+      },
+      "source": {"type": "scryfall", "bulk_type": "oracle_cards", "paper_only": true},
+      "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
+      "max_changed_rows": 5000,
+      "enabled": false,
+      "seed_required": true
+    },
+    {
+      "key": "milo1/scryfall/mtg-artworks",
+      "descriptor": {
+        "game": "magic-the-gathering",
+        "source": "scryfall",
+        "profile": "artworks",
+        "description": "One representative printing per unique Scryfall artwork.",
+        "result_identifier": "scryfall_card"
+      },
+      "source": {"type": "scryfall", "bulk_type": "unique_artwork", "paper_only": true},
+      "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
+      "max_changed_rows": 5000,
+      "enabled": false,
+      "seed_required": true
+    },
+    {
+      "key": "milo1/scryfall/mtg-all-languages",
+      "descriptor": {
+        "game": "magic-the-gathering",
+        "source": "scryfall",
+        "profile": "all-languages",
+        "description": "All paper printings and languages from Scryfall.",
+        "result_identifier": "scryfall_card"
+      },
+      "source": {"type": "scryfall", "bulk_type": "all_cards", "paper_only": true},
+      "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
+      "max_changed_rows": 5000,
+      "enabled": false,
+      "seed_required": true
+    },
+    {
       "key": "milo1/tcgplayer/magic-the-gathering",
+      "descriptor": {"game": "magic-the-gathering", "source": "tcgplayer", "profile": "printings", "description": "TCGplayer marketplace printing catalog.", "result_identifier": "tcgplayer_product", "recommended": true},
       "source": {"type": "tcgcsv", "category_id": 1},
       "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
       "enabled": true,
@@ -22,6 +76,7 @@
     },
     {
       "key": "milo1/tcgplayer/yugioh",
+      "descriptor": {"game": "yugioh", "source": "tcgplayer", "profile": "printings", "description": "TCGplayer marketplace printing catalog.", "result_identifier": "tcgplayer_product", "recommended": true},
       "source": {"type": "tcgcsv", "category_id": 2},
       "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
       "enabled": true,
@@ -29,6 +84,7 @@
     },
     {
       "key": "milo1/tcgplayer/pokemon",
+      "descriptor": {"game": "pokemon", "source": "tcgplayer", "profile": "printings", "description": "TCGplayer marketplace printing catalog.", "result_identifier": "tcgplayer_product", "recommended": true},
       "source": {"type": "tcgcsv", "category_id": 3},
       "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
       "enabled": true,
@@ -36,6 +92,7 @@
     },
     {
       "key": "milo1/tcgplayer/flesh-and-blood",
+      "descriptor": {"game": "flesh-and-blood", "source": "tcgplayer", "profile": "printings", "description": "TCGplayer marketplace printing catalog.", "result_identifier": "tcgplayer_product", "recommended": true},
       "source": {"type": "tcgcsv", "category_id": 62},
       "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
       "enabled": true,
@@ -43,6 +100,7 @@
     },
     {
       "key": "milo1/tcgplayer/digimon-card-game",
+      "descriptor": {"game": "digimon-card-game", "source": "tcgplayer", "profile": "printings", "description": "TCGplayer marketplace printing catalog.", "result_identifier": "tcgplayer_product", "recommended": true},
       "source": {"type": "tcgcsv", "category_id": 63},
       "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
       "enabled": true,
@@ -50,6 +108,7 @@
     },
     {
       "key": "milo1/tcgplayer/one-piece",
+      "descriptor": {"game": "one-piece", "source": "tcgplayer", "profile": "printings", "description": "TCGplayer marketplace printing catalog.", "result_identifier": "tcgplayer_product", "recommended": true},
       "source": {"type": "tcgcsv", "category_id": 68},
       "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
       "enabled": true,
@@ -57,6 +116,7 @@
     },
     {
       "key": "milo1/tcgplayer/lorcana",
+      "descriptor": {"game": "lorcana", "source": "tcgplayer", "profile": "printings", "description": "TCGplayer marketplace printing catalog.", "result_identifier": "tcgplayer_product", "recommended": true},
       "source": {"type": "tcgcsv", "category_id": 71},
       "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
       "enabled": true,
@@ -64,6 +124,7 @@
     },
     {
       "key": "milo1/tcgplayer/star-wars-unlimited",
+      "descriptor": {"game": "star-wars-unlimited", "source": "tcgplayer", "profile": "printings", "description": "TCGplayer marketplace printing catalog.", "result_identifier": "tcgplayer_product", "recommended": true},
       "source": {"type": "tcgcsv", "category_id": 79},
       "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
       "enabled": true,
@@ -71,6 +132,7 @@
     },
     {
       "key": "milo1/tcgplayer/union-arena",
+      "descriptor": {"game": "union-arena", "source": "tcgplayer", "profile": "printings", "description": "TCGplayer marketplace printing catalog.", "result_identifier": "tcgplayer_product", "recommended": true},
       "source": {"type": "tcgcsv", "category_id": 81},
       "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
       "enabled": false,
@@ -78,6 +140,7 @@
     },
     {
       "key": "milo1/tcgplayer/riftbound",
+      "descriptor": {"game": "riftbound", "source": "tcgplayer", "profile": "printings", "description": "TCGplayer marketplace printing catalog.", "result_identifier": "tcgplayer_product", "recommended": true},
       "source": {"type": "tcgcsv", "category_id": 89},
       "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
       "enabled": false,

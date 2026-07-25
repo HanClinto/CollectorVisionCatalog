@@ -8,7 +8,8 @@ import json
 import os
 import re
 import time
-from collections.abc import Callable, Iterable, Sequence
+from collections import defaultdict
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from pathlib import Path
@@ -16,22 +17,27 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
+from uuid import UUID
 
 from PIL import Image
 
 from collectorvision_catalog import (
     CatalogBuild,
+    CatalogDescriptor,
     RecognitionRow,
+    SourceRevision,
     ValidationError,
     build_catalog,
     load_catalog_build,
     manifest_filename_for_catalog,
+    normalize_rfc3339_utc,
     validate_artifacts,
     write_catalog_index,
 )
 from collectorvision_catalog.artifacts import Embedder, ImageLoader, default_image_loader
 from collectorvision_catalog.quality import apply_quality_rules, load_quality_rules
 from collectorvision_catalog.sources.scryfall import normalize_scryfall_card
+from collectorvision_catalog.sources.snapshots import SourceSnapshot
 from collectorvision_catalog.sources.tcgcsv import normalize_tcgcsv_product
 
 USER_AGENT = "CollectorVisionCatalog/0.1 (+https://github.com/HanClinto/CollectorVisionCatalog)"
@@ -54,17 +60,19 @@ class CatalogConfig:
     max_changed_rows: int
     enabled: bool
     seed_required: bool
+    descriptor: CatalogDescriptor
 
 
 def load_config(path: Path) -> list[CatalogConfig]:
     payload = json.loads(path.read_text(encoding="utf-8"))
-    if payload.get("schema_version") != 1:
-        raise ValidationError("config schema_version must be 1")
+    if payload.get("schema_version") != 2:
+        raise ValidationError("config schema_version must be 2")
     raw_catalogs = payload.get("catalogs")
     if not isinstance(raw_catalogs, list):
         raise ValidationError("config catalogs must be a list")
     catalogs: list[CatalogConfig] = []
     seen_keys: set[str] = set()
+    recommended_profiles: set[tuple[str, str, str]] = set()
     for index, raw in enumerate(raw_catalogs):
         if not isinstance(raw, dict):
             raise ValidationError(f"config catalogs[{index}] must be an object")
@@ -76,6 +84,21 @@ def load_config(path: Path) -> list[CatalogConfig]:
         if not isinstance(source, dict):
             raise ValidationError(f"catalog {key!r} source must be an object")
         _required_text(source.get("type"), f"catalog {key!r} source.type")
+        descriptor_payload = raw.get("descriptor")
+        if not isinstance(descriptor_payload, dict):
+            raise ValidationError(f"catalog {key!r} descriptor must be an object")
+        descriptor = CatalogDescriptor.from_dict(descriptor_payload)
+        recommendation_key = (
+            descriptor.game,
+            descriptor.source,
+            _required_text(raw.get("embedding_model"), f"catalog {key!r} embedding_model"),
+        )
+        if descriptor.recommended and recommendation_key in recommended_profiles:
+            raise ValidationError(
+                "at most one profile may be recommended per game/source/embedding model"
+            )
+        if descriptor.recommended:
+            recommended_profiles.add(recommendation_key)
         catalogs.append(
             CatalogConfig(
                 key=key,
@@ -89,18 +112,36 @@ def load_config(path: Path) -> list[CatalogConfig]:
                 ),
                 enabled=bool(raw.get("enabled", False)),
                 seed_required=bool(raw.get("seed_required", True)),
+                descriptor=descriptor,
             )
         )
     return catalogs
 
 
-def fetch_scryfall_rows(source: dict[str, Any]) -> list[RecognitionRow]:
+SCRYFALL_BULK_INDEX_URL = "https://api.scryfall.com/bulk-data"
+TCGCSV_LAST_UPDATED_URL = "https://tcgcsv.com/last-updated.txt"
+
+
+def scryfall_revision_from_entry(entry: Mapping[str, Any]) -> SourceRevision:
+    bulk_type = _required_text(entry.get("type"), "Scryfall bulk type")
+    download_url = _required_text(
+        entry.get("jsonl_download_uri"), f"Scryfall {bulk_type} JSONL download"
+    )
+    bulk_id = str(entry.get("id") or bulk_type)
+    return SourceRevision(
+        source_type="scryfall",
+        source_name=bulk_type,
+        updated_at=normalize_rfc3339_utc(
+            _required_text(entry.get("updated_at"), f"Scryfall {bulk_type} updated_at")
+        ),
+        uri=download_url,
+        identity=bulk_id,
+    )
+
+
+def fetch_scryfall_revision(source: Mapping[str, Any]) -> SourceRevision:
     bulk_type = _required_text(source.get("bulk_type"), "scryfall bulk_type")
-    languages = {
-        _required_text(language, "scryfall language")
-        for language in source.get("languages", [])
-    }
-    bulk_index = _read_json_url("https://api.scryfall.com/bulk-data")
+    bulk_index = _read_json_url(SCRYFALL_BULK_INDEX_URL)
     entries = bulk_index.get("data", [])
     entry = next(
         (
@@ -112,12 +153,18 @@ def fetch_scryfall_rows(source: dict[str, Any]) -> list[RecognitionRow]:
     )
     if entry is None:
         raise ValidationError(f"Scryfall bulk data does not contain type {bulk_type!r}")
-    download_url = entry.get("jsonl_download_uri")
-    if not isinstance(download_url, str) or not download_url:
-        raise ValidationError(f"Scryfall bulk type {bulk_type!r} has no JSONL download")
+    return scryfall_revision_from_entry(entry)
+
+
+def fetch_scryfall_snapshot(source: dict[str, Any]) -> SourceSnapshot[RecognitionRow]:
+    revision = fetch_scryfall_revision(source)
+    languages = {
+        _required_text(language, "scryfall language")
+        for language in source.get("languages", [])
+    }
 
     rows: list[RecognitionRow] = []
-    request = Request(download_url, headers={"User-Agent": USER_AGENT, "Accept": "*/*"})
+    request = Request(revision.uri, headers={"User-Agent": USER_AGENT, "Accept": "*/*"})
     with urlopen(request, timeout=120) as response:
         with gzip.GzipFile(fileobj=response) as compressed:
             for line_number, raw_line in enumerate(compressed, start=1):
@@ -135,11 +182,31 @@ def fetch_scryfall_rows(source: dict[str, Any]) -> list[RecognitionRow]:
                     continue
                 rows.extend(normalize_scryfall_card(card))
     if not rows:
-        raise ValidationError(f"Scryfall bulk type {bulk_type!r} produced no recognition rows")
-    return rows
+        raise ValidationError(
+            f"Scryfall bulk type {revision.source_name!r} produced no recognition rows"
+        )
+    return SourceSnapshot(revision=revision, rows=tuple(rows))
 
 
-def fetch_tcgcsv_rows(source: dict[str, Any]) -> list[RecognitionRow]:
+def fetch_scryfall_rows(source: dict[str, Any]) -> list[RecognitionRow]:
+    return list(fetch_scryfall_snapshot(source).rows)
+
+
+def fetch_tcgcsv_revision() -> SourceRevision:
+    updated_at = normalize_rfc3339_utc(_read_text_url(TCGCSV_LAST_UPDATED_URL).strip())
+    return SourceRevision(
+        source_type="tcgcsv",
+        source_name="tcgplayer",
+        updated_at=updated_at,
+        uri=TCGCSV_LAST_UPDATED_URL,
+        identity=updated_at,
+    )
+
+
+def _fetch_tcgcsv_category_rows(
+    source: dict[str, Any],
+    categories_payload: dict[str, Any] | None = None,
+) -> list[RecognitionRow]:
     category_id = _non_negative_int(source.get("category_id"), "tcgcsv category_id")
     if category_id == 0:
         raise ValidationError("tcgcsv category_id must be positive")
@@ -147,7 +214,9 @@ def fetch_tcgcsv_rows(source: dict[str, Any]) -> list[RecognitionRow]:
     if workers == 0:
         raise ValidationError("tcgcsv fetch_workers must be positive")
 
-    category_payload = _read_json_url("https://tcgcsv.com/tcgplayer/categories")
+    category_payload = categories_payload or _read_json_url(
+        "https://tcgcsv.com/tcgplayer/categories"
+    )
     category = next(
         (
             item
@@ -187,6 +256,36 @@ def fetch_tcgcsv_rows(source: dict[str, Any]) -> list[RecognitionRow]:
     return rows
 
 
+def fetch_tcgcsv_snapshots(
+    sources: Mapping[str, dict[str, Any]],
+    *,
+    expected_revision: SourceRevision | None = None,
+) -> dict[str, SourceSnapshot[RecognitionRow]]:
+    before = fetch_tcgcsv_revision()
+    if expected_revision is not None and before != expected_revision:
+        raise ValidationError("TCGCSV source revision does not match expected revision")
+    categories_payload = _read_json_url("https://tcgcsv.com/tcgplayer/categories")
+    rows_by_key = {
+        key: _fetch_tcgcsv_category_rows(source, categories_payload)
+        for key, source in sources.items()
+    }
+    after = fetch_tcgcsv_revision()
+    if after != before:
+        raise ValidationError("TCGCSV source changed while catalogs were being fetched")
+    return {
+        key: SourceSnapshot(revision=before, rows=tuple(rows))
+        for key, rows in rows_by_key.items()
+    }
+
+
+def fetch_tcgcsv_snapshot(source: dict[str, Any]) -> SourceSnapshot[RecognitionRow]:
+    return fetch_tcgcsv_snapshots({"catalog": source})["catalog"]
+
+
+def fetch_tcgcsv_rows(source: dict[str, Any]) -> list[RecognitionRow]:
+    return list(fetch_tcgcsv_snapshot(source).rows)
+
+
 def build_enabled_catalogs(
     *,
     config_path: Path,
@@ -199,6 +298,7 @@ def build_enabled_catalogs(
     cache_root: Path | None = None,
     batch_size: int = 16,
     source_rows_factory: Callable[[dict[str, Any]], list[RecognitionRow]] | None = None,
+    expected_source_revisions: Mapping[str, SourceRevision] | None = None,
     embedder_factory: Callable[[str, int], Embedder] | None = None,
     image_loader: ImageLoader | None = None,
 ) -> dict[str, Any]:
@@ -211,16 +311,62 @@ def build_enabled_catalogs(
     summaries = []
     quality_reports: dict[str, Any] = {}
     quality_rules = load_quality_rules(quality_overrides_path)
+    expected_source_revisions = expected_source_revisions or {}
+    snapshots: dict[str, SourceSnapshot[RecognitionRow]] = {}
+    if source_rows_factory is not None:
+        for config in configs:
+            revision = expected_source_revisions.get(config.key) or SourceRevision(
+                source_type=str(config.source.get("type")),
+                source_name=config.key,
+                updated_at="2000-01-01T00:00:00Z",
+                uri="memory://injected-source",
+                identity="injected-test-source",
+            )
+            snapshots[config.key] = SourceSnapshot(
+                revision=revision,
+                rows=tuple(source_rows_factory(config.source)),
+            )
+    else:
+        tcg_sources = {
+            config.key: config.source
+            for config in configs
+            if config.source.get("type") == "tcgcsv"
+        }
+        if tcg_sources:
+            expected_tcg = {
+                expected_source_revisions[key]
+                for key in tcg_sources
+                if key in expected_source_revisions
+            }
+            if len(expected_tcg) > 1:
+                raise ValidationError("configured TCGCSV catalogs have inconsistent expectations")
+            snapshots.update(
+                fetch_tcgcsv_snapshots(
+                    tcg_sources,
+                    expected_revision=next(iter(expected_tcg), None),
+                )
+            )
+        for config in configs:
+            if config.source.get("type") != "scryfall":
+                continue
+            snapshot = fetch_scryfall_snapshot(config.source)
+            expected = expected_source_revisions.get(config.key)
+            if expected is not None and snapshot.revision != expected:
+                raise ValidationError(
+                    f"source revision for {config.key!r} does not match expected revision"
+                )
+            snapshots[config.key] = snapshot
+    missing_expectations = set(expected_source_revisions).difference(
+        config.key for config in configs
+    )
+    if missing_expectations:
+        raise ValidationError(
+            f"expected source revisions contain unknown catalogs: {sorted(missing_expectations)}"
+        )
 
     for config in configs:
         source_type = config.source.get("type")
-        if source_rows_factory is not None:
-            effective_rows_factory = source_rows_factory
-        elif source_type == "scryfall":
-            effective_rows_factory = fetch_scryfall_rows
-        elif source_type == "tcgcsv":
-            effective_rows_factory = fetch_tcgcsv_rows
-        else:
+        if source_type not in {"scryfall", "tcgcsv"}:
             raise ValidationError(f"unsupported source type {source_type!r}")
         previous_manifest = previous_dir / manifest_filename_for_catalog(config.key)
         previous: CatalogBuild | None = None
@@ -232,7 +378,8 @@ def build_enabled_catalogs(
                 "run locally with --allow-full-rebuild for the first build"
             )
 
-        rows = effective_rows_factory(config.source)
+        snapshot = snapshots[config.key]
+        rows = list(snapshot.rows)
         quality_result = apply_quality_rules(
             rows,
             source_type=str(source_type),
@@ -240,6 +387,7 @@ def build_enabled_catalogs(
         )
         rows = list(quality_result.rows)
         quality_reports[config.key] = quality_result.report()
+        quality_reports[config.key]["source_revision"] = snapshot.revision.to_dict()
         if previous is not None:
             changed_rows = _count_changed_image_rows(rows, previous)
             if changed_rows > config.max_changed_rows:
@@ -288,6 +436,8 @@ def build_enabled_catalogs(
             catalog_key=config.key,
             version=version,
             embedding_model=config.embedding_model,
+            source_revision=snapshot.revision,
+            descriptor=config.descriptor,
             previous_build=previous,
             image_loader=effective_image_loader,
             batch_size=batch_size,
@@ -306,16 +456,19 @@ def build_enabled_catalogs(
                 "delta_operations": build.manifest.delta.operations,
                 "metadata_delta_operations": build.manifest.delta.metadata_operations,
                 "changed": previous is None
+                or previous.manifest.source_revision != snapshot.revision
                 or build.manifest.delta.operations > 0
                 or build.manifest.delta.metadata_operations > 0,
                 "quality_excluded_rows": len(quality_result.findings),
+                "source_revision": snapshot.revision.to_dict(),
             }
         )
 
     index_path = output_dir / "catalog-index-v2.json"
-    write_catalog_index(index_path, version, manifests)
+    index = write_catalog_index(index_path, version, manifests)
     summary = {
         "version": version,
+        "source_updated_at": index.source_updated_at,
         "changed": any(item["changed"] for item in summaries),
         "catalogs": summaries,
         "quality_excluded_rows": sum(
@@ -375,7 +528,7 @@ def local_first_image_loader(
 
     url_to_path: dict[str, Path] = {}
     for row in rows:
-        primary = row.primary_id.value
+        primary = _row_source_id(row)
         candidates = (
             [f"{primary}_back", f"{primary}_{row.face_index}", primary]
             if row.face_index > 0
@@ -400,6 +553,30 @@ def local_first_image_loader(
     return load
 
 
+def _row_source_id(row: RecognitionRow) -> str:
+    if value := row.identifiers.get("scryfall_card"):
+        return _canonical_uuid(value, row.key)
+    if value := row.identifiers.get("tcgplayer_product"):
+        return _positive_decimal_id(value, row.key)
+    raise ValidationError(f"row {row.key!r} has no supported source image identifier")
+
+
+def _canonical_uuid(value: str, row_key: str) -> str:
+    try:
+        canonical = str(UUID(value))
+    except ValueError as error:
+        raise ValidationError(f"row {row_key!r} has an invalid Scryfall card ID") from error
+    if value.lower() != canonical:
+        raise ValidationError(f"row {row_key!r} has a non-canonical Scryfall card ID")
+    return canonical
+
+
+def _positive_decimal_id(value: str, row_key: str) -> str:
+    if not value.isascii() or not value.isdecimal() or int(value) <= 0:
+        raise ValidationError(f"row {row_key!r} has an invalid TCGplayer product ID")
+    return str(int(value))
+
+
 def tcgplayer_network_image_loader(image_url: str) -> Image.Image:
     payload = _download_tcgplayer_image(image_url)
     with Image.open(io.BytesIO(payload)) as image:
@@ -411,37 +588,41 @@ def tcgplayer_network_image_loader(image_url: str) -> Image.Image:
 class ScryfallImageCache:
     def __init__(self, cache_root: Path, rows: Iterable[RecognitionRow]) -> None:
         self.images_root = _resolve_scryfall_images_root(cache_root)
+        paths_by_url: dict[str, list[Path]] = defaultdict(list)
+        revisions: dict[str, int] = {}
+        for row in rows:
+            paths_by_url[row.image_url].append(self.path_for_row(row))
+            revisions[row.image_url] = scryfall_image_revision(row.image_url)
         self._entries = {
-            row.image_url: (
-                self.path_for_row(row),
-                scryfall_image_revision(row.image_url),
-            )
-            for row in rows
+            image_url: (tuple(paths), revisions[image_url])
+            for image_url, paths in paths_by_url.items()
         }
 
     def path_for_row(self, row: RecognitionRow) -> Path:
         face = "back" if row.face_index > 0 else "front"
-        card_id = row.primary_id.value
+        card_id = _canonical_uuid(row.identifiers["scryfall_card"], row.key)
         return self.images_root / face / card_id[0] / card_id[1] / f"{card_id}.png"
 
     def is_current(self, row: RecognitionRow) -> bool:
-        path = self.path_for_row(row)
-        revision = scryfall_image_revision(row.image_url)
-        return path.is_file() and (
-            revision == 0 or abs(path.stat().st_mtime - revision) < 1.0
+        paths, revision = self._entries[row.image_url]
+        return any(
+            path.is_file()
+            and (revision == 0 or abs(path.stat().st_mtime - revision) < 1.0)
+            for path in paths
         )
 
     def __call__(self, image_url: str) -> Image.Image:
         try:
-            path, revision = self._entries[image_url]
+            paths, revision = self._entries[image_url]
         except KeyError as error:
             raise ValidationError(
                 f"image URL is not part of this Scryfall build: {image_url}"
             ) from error
-        if path.is_file() and (
-            revision == 0 or abs(path.stat().st_mtime - revision) < 1.0
-        ):
-            return _open_rgb_image(path)
+        for path in paths:
+            if path.is_file() and (
+                revision == 0 or abs(path.stat().st_mtime - revision) < 1.0
+            ):
+                return _open_rgb_image(path)
 
         request = Request(
             image_url,
@@ -452,6 +633,7 @@ class ScryfallImageCache:
         with Image.open(io.BytesIO(payload)) as image:
             image.verify()
 
+        path = paths[0]
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_name(f".{path.name}.tmp-{os.getpid()}")
         try:
@@ -525,7 +707,7 @@ class TCGplayerImageCache:
         self._refresh_urls = frozenset(refresh_urls)
 
     def path_for_row(self, row: RecognitionRow) -> Path:
-        product_id = row.primary_id.value
+        product_id = _positive_decimal_id(row.identifiers["tcgplayer_product"], row.key)
         suffix = "" if row.face_index == 0 else f"_{row.face_index}"
         return (
             self.images_root
@@ -641,6 +823,15 @@ def _read_json_url(url: str) -> dict[str, Any]:
     return payload
 
 
+def _read_text_url(url: str) -> str:
+    request = Request(
+        url,
+        headers={"User-Agent": USER_AGENT, "Accept": "text/plain"},
+    )
+    with urlopen(request, timeout=30) as response:
+        return response.read().decode("utf-8")
+
+
 def _response_results(payload: dict[str, Any], source_name: str) -> list[dict[str, Any]]:
     if payload.get("success") is not True:
         raise ValidationError(f"{source_name} request failed: {payload.get('errors', [])}")
@@ -694,11 +885,33 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--image-dir", type=Path, action="append", default=[])
     parser.add_argument("--cache-root", type=Path, default=None)
     parser.add_argument("--batch-size", type=int, default=16)
+    parser.add_argument(
+        "--expected-source-revisions",
+        type=Path,
+        help="Source-status JSON captured before choosing the release version",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
+    expected_revisions: dict[str, SourceRevision] = {}
+    if args.expected_source_revisions is not None:
+        payload = json.loads(args.expected_source_revisions.read_text(encoding="utf-8"))
+        raw_catalogs = payload.get("catalogs")
+        if not isinstance(raw_catalogs, dict):
+            raise ValidationError("expected source revisions catalogs must be an object")
+        expected_revisions = {
+            str(key): SourceRevision.from_dict(value)
+            for key, value in raw_catalogs.items()
+        }
+        enabled_keys = {
+            config.key for config in load_config(args.config) if config.enabled
+        }
+        if set(expected_revisions) != enabled_keys:
+            raise ValidationError(
+                "expected source revision catalogs must exactly match enabled catalogs"
+            )
     summary = build_enabled_catalogs(
         config_path=args.config,
         quality_overrides_path=args.quality_overrides,
@@ -709,6 +922,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         image_dirs=args.image_dir,
         cache_root=args.cache_root,
         batch_size=args.batch_size,
+        expected_source_revisions=expected_revisions,
     )
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0

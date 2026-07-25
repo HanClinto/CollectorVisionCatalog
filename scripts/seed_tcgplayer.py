@@ -15,6 +15,7 @@ from numpy.typing import NDArray
 
 from collectorvision_catalog import (
     RecognitionRow,
+    SourceRevision,
     ValidationError,
     build_catalog,
     manifest_filename_for_catalog,
@@ -27,7 +28,7 @@ _UPDATER = runpy.run_path(str(Path(__file__).with_name("update_catalogs.py")))
 TCGplayerImageCache = _UPDATER["TCGplayerImageCache"]
 TCGplayerImageUnavailable = _UPDATER["TCGplayerImageUnavailable"]
 create_embedder = _UPDATER["create_embedder"]
-fetch_tcgcsv_rows = _UPDATER["fetch_tcgcsv_rows"]
+fetch_tcgcsv_snapshots = _UPDATER["fetch_tcgcsv_snapshots"]
 load_config = _UPDATER["load_config"]
 
 LEGACY_CATALOG_KEYS = {
@@ -168,6 +169,7 @@ def build_seed(
     max_downloads: int,
     refresh_workers: int,
     build: bool,
+    expected_revision: SourceRevision | None = None,
 ) -> dict[str, Any]:
     configs_by_key = {
         config.key: config
@@ -182,16 +184,27 @@ def build_seed(
     model_ids: set[str] = set()
     quality_reports: dict[str, Any] = {}
     quality_rules = load_quality_rules(quality_overrides_path)
+    snapshots = fetch_tcgcsv_snapshots(
+        {
+            catalog_key: configs_by_key[catalog_key].source
+            for catalog_key in LEGACY_CATALOG_KEYS
+        },
+        expected_revision=expected_revision,
+    )
     for catalog_key, legacy_key in LEGACY_CATALOG_KEYS.items():
         config = configs_by_key[catalog_key]
-        rows = fetch_tcgcsv_rows(config.source)
+        snapshot = snapshots[catalog_key]
+        rows = list(snapshot.rows)
         quality_result = apply_quality_rules(
             rows,
             source_type="tcgcsv",
             rules=quality_rules,
         )
         rows = list(quality_result.rows)
-        quality_reports[catalog_key] = quality_result.report()
+        quality_reports[catalog_key] = {
+            **quality_result.report(),
+            "source_revision": snapshot.revision.to_dict(),
+        }
         legacy_embeddings = load_legacy_embeddings(legacy_dir, legacy_key)
         image_cache = TCGplayerImageCache(cache_root, rows)
         known_unavailable = {
@@ -211,6 +224,7 @@ def build_seed(
     total_downloads = sum(len(plan.download_rows) for plan in plans)
     summary: dict[str, Any] = {
         "version": version,
+        "source_revision": next(iter(snapshots.values())).revision.to_dict(),
         "catalogs": [plan.summary() for plan in plans],
         "downloads_required": total_downloads,
         "embeddings_to_compute": sum(len(plan.inference_rows) for plan in plans),
@@ -260,6 +274,8 @@ def build_seed(
             catalog_key=plan.catalog_key,
             version=version,
             embedding_model=config.embedding_model,
+            source_revision=snapshots[plan.catalog_key].revision,
+            descriptor=config.descriptor,
             seed_embeddings=effective_seed_embeddings,
             image_loader=image_cache,
             batch_size=batch_size,
@@ -276,7 +292,8 @@ def build_seed(
         catalog_summary["output_rows"] = len(effective_rows)
         catalog_summary["embeddings_computed"] = len(effective_inference_rows)
 
-    write_catalog_index(output_dir / "catalog-index-v2.json", version, manifests)
+    index = write_catalog_index(output_dir / "catalog-index-v2.json", version, manifests)
+    summary["source_updated_at"] = index.source_updated_at
     summary["unavailable_images"] = sum(
         item.get("unavailable_images", 0) for item in summary["catalogs"]
     )
@@ -309,6 +326,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--legacy-dir", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, default=Path("tcgplayer-release"))
     parser.add_argument("--version", required=True)
+    parser.add_argument("--expected-source-revisions", type=Path)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--refresh-workers", type=int, default=4)
     parser.add_argument(
@@ -327,6 +345,22 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
+    expected_revision = None
+    if args.expected_source_revisions is not None:
+        payload = json.loads(args.expected_source_revisions.read_text(encoding="utf-8"))
+        raw_catalogs = payload.get("catalogs")
+        if not isinstance(raw_catalogs, dict):
+            raise ValidationError("expected source revisions catalogs must be an object")
+        revisions = {
+            SourceRevision.from_dict(raw_catalogs[key])
+            for key in LEGACY_CATALOG_KEYS
+            if key in raw_catalogs
+        }
+        if len(revisions) != 1 or not set(LEGACY_CATALOG_KEYS).issubset(raw_catalogs):
+            raise ValidationError(
+                "expected source revisions must contain one shared TCGCSV revision"
+            )
+        expected_revision = next(iter(revisions))
     build_seed(
         config_path=args.config,
         quality_overrides_path=args.quality_overrides,
@@ -338,6 +372,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_downloads=args.max_downloads,
         refresh_workers=args.refresh_workers,
         build=args.build,
+        expected_revision=expected_revision,
     )
     return 0
 

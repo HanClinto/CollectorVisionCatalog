@@ -2,9 +2,16 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from conftest import TrackingEmbedder, TrackingImageLoader, make_row
+from conftest import (
+    TrackingEmbedder,
+    TrackingImageLoader,
+    make_row,
+)
+from conftest import (
+    build_test_catalog as build_catalog,
+)
 
-from collectorvision_catalog import build_catalog, manifest_filename_for_catalog
+from collectorvision_catalog import manifest_filename_for_catalog
 from collectorvision_catalog.cli import main
 
 

@@ -1,10 +1,11 @@
 from .artifacts import (
     AssetIntegrityError,
     CatalogBuild,
+    CatalogDescriptor,
     CatalogError,
     CatalogManifest,
-    PrimaryID,
     RecognitionRow,
+    SourceRevision,
     ValidationError,
     apply_delta,
     build_catalog,
@@ -13,21 +14,28 @@ from .artifacts import (
     load_delta_bundle,
     load_manifest,
     manifest_filename_for_catalog,
+    max_source_updated_at,
+    normalize_rfc3339_utc,
     validate_artifacts,
 )
 from .index import CatalogIndex, CatalogIndexEntry, load_catalog_index, write_catalog_index
+from .release import assemble_seed_release, validate_release, write_checksums
+from .sources.snapshots import SourceSnapshot
 
 __all__ = [
     "AssetIntegrityError",
     "CatalogBuild",
+    "CatalogDescriptor",
     "CatalogError",
     "CatalogIndex",
     "CatalogIndexEntry",
     "CatalogManifest",
-    "PrimaryID",
     "RecognitionRow",
+    "SourceRevision",
+    "SourceSnapshot",
     "ValidationError",
     "apply_delta",
+    "assemble_seed_release",
     "build_catalog",
     "catalog_key_to_slug",
     "load_catalog_build",
@@ -35,6 +43,10 @@ __all__ = [
     "load_delta_bundle",
     "load_manifest",
     "manifest_filename_for_catalog",
+    "normalize_rfc3339_utc",
+    "max_source_updated_at",
     "validate_artifacts",
+    "validate_release",
+    "write_checksums",
     "write_catalog_index",
 ]

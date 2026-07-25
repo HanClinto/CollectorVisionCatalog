@@ -14,7 +14,7 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from collectorvision_catalog import PrimaryID, RecognitionRow, ValidationError
+from collectorvision_catalog import RecognitionRow, ValidationError
 
 SCRIPT_PATH = Path(__file__).parents[1] / "scripts" / "update_catalogs.py"
 SPEC = importlib.util.spec_from_file_location("update_catalogs", SCRIPT_PATH)
@@ -23,10 +23,21 @@ updater = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = updater
 SPEC.loader.exec_module(updater)
 
+CARD_ID = "ca000000-0000-0000-0000-000000000001"
+ORACLE_ID = "0a000000-0000-0000-0000-000000000001"
+
 
 def make_config(path: Path, *, duplicate: bool = False) -> None:
     catalog = {
         "key": "milo1/scryfall/mtg",
+        "descriptor": {
+            "game": "magic-the-gathering",
+            "source": "scryfall",
+            "profile": "printings",
+            "description": "Test printings.",
+            "result_identifier": "scryfall_card",
+            "recommended": True,
+        },
         "source": {"type": "scryfall", "bulk_type": "default_cards", "languages": ["en"]},
         "embedding_model": updater.MILO1_MODEL_ID,
         "enabled": True,
@@ -35,7 +46,7 @@ def make_config(path: Path, *, duplicate: bool = False) -> None:
     path.write_text(
         json.dumps(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "catalogs": [catalog, dict(catalog)] if duplicate else [catalog],
             }
         ),
@@ -45,9 +56,8 @@ def make_config(path: Path, *, duplicate: bool = False) -> None:
 
 def make_row(image_url: str = "memory://front") -> RecognitionRow:
     return RecognitionRow(
-        key="scryfall:card-1:face:0",
-        primary_id=PrimaryID("scryfall", "card-1"),
-        secondary_ids={"scryfall_oracle": "oracle-1"},
+        key=f"scryfall:{CARD_ID}:face:0",
+        identifiers={"scryfall_card": CARD_ID, "scryfall_oracle": ORACLE_ID},
         face_index=0,
         image_url=image_url,
         image_fingerprint="fingerprint-1",
@@ -62,14 +72,73 @@ def test_load_config_rejects_duplicate_keys(tmp_path: Path) -> None:
         updater.load_config(path)
 
 
+def test_repository_config_exposes_independent_profiles() -> None:
+    configs = updater.load_config(Path("config/catalogs.json"))
+    scryfall = [item for item in configs if item.descriptor.source == "scryfall"]
+    assert {item.descriptor.profile for item in scryfall} == {
+        "printings",
+        "cards",
+        "artworks",
+        "all-languages",
+    }
+    assert sum(item.descriptor.recommended for item in scryfall) == 1
+    assert all(item.seed_required for item in scryfall)
+    assert all(not item.enabled for item in scryfall if item.descriptor.profile != "printings")
+
+
+def test_scryfall_revision_is_extracted_from_selected_bulk_entry(monkeypatch) -> None:
+    monkeypatch.setattr(
+        updater,
+        "_read_json_url",
+        lambda url: {
+            "data": [
+                {
+                    "id": "bulk-id",
+                    "type": "default_cards",
+                    "updated_at": "2026-07-24T21:11:04.682+00:00",
+                    "jsonl_download_uri": "https://data.scryfall.io/default.jsonl.gz",
+                }
+            ]
+        },
+    )
+    revision = updater.fetch_scryfall_revision({"bulk_type": "default_cards"})
+    assert revision.to_dict() == {
+        "type": "scryfall",
+        "name": "default_cards",
+        "updated_at": "2026-07-24T21:11:04.682Z",
+        "uri": "https://data.scryfall.io/default.jsonl.gz",
+        "identity": "bulk-id",
+    }
+
+
+def test_tcgcsv_fetch_rejects_revision_change_mid_read(monkeypatch) -> None:
+    timestamps = iter(
+        ["2026-07-24T20:11:00+0000", "2026-07-24T20:12:00+0000"]
+    )
+    monkeypatch.setattr(updater, "_read_text_url", lambda url: next(timestamps))
+    monkeypatch.setattr(
+        updater,
+        "_read_json_url",
+        lambda url: {"success": True, "results": []},
+    )
+    monkeypatch.setattr(
+        updater,
+        "_fetch_tcgcsv_category_rows",
+        lambda source, categories: [make_row()],
+    )
+    with pytest.raises(ValidationError, match="changed while"):
+        updater.fetch_tcgcsv_snapshots(
+            {"catalog": {"category_id": 1, "fetch_workers": 1}}
+        )
+
+
 def test_local_first_image_loader_uses_front_and_back_cache_names(tmp_path: Path) -> None:
-    Image.new("RGB", (2, 2), (255, 0, 0)).save(tmp_path / "card-1.png")
-    Image.new("RGB", (2, 2), (0, 0, 255)).save(tmp_path / "card-1_back.jpg")
+    Image.new("RGB", (2, 2), (255, 0, 0)).save(tmp_path / f"{CARD_ID}.png")
+    Image.new("RGB", (2, 2), (0, 0, 255)).save(tmp_path / f"{CARD_ID}_back.jpg")
     front = make_row("https://example.test/front")
     back = RecognitionRow(
-        key="scryfall:card-1:face:1",
-        primary_id=front.primary_id,
-        secondary_ids=front.secondary_ids,
+        key=f"scryfall:{CARD_ID}:face:1",
+        identifiers=front.identifiers,
         face_index=1,
         image_url="https://example.test/back",
         image_fingerprint="fingerprint-2",
@@ -90,8 +159,8 @@ def test_scryfall_cache_resolves_sharded_face_and_revision(tmp_path: Path) -> No
     images_root = tmp_path / "scryfall" / "images" / "png"
     (images_root / "front").mkdir(parents=True)
     (images_root / "back").mkdir()
-    row = make_row("https://cards.scryfall.io/png/front/c/a/card-1.png?123")
-    path = images_root / "front" / "c" / "a" / "card-1.png"
+    row = make_row(f"https://cards.scryfall.io/png/front/c/a/{CARD_ID}.png?123")
+    path = images_root / "front" / "c" / "a" / f"{CARD_ID}.png"
     path.parent.mkdir(parents=True)
     Image.new("RGB", (2, 2), (255, 0, 0)).save(path)
     os.utime(path, (123, 123))
@@ -113,8 +182,7 @@ def test_tcgplayer_cache_resolves_sharded_product_image(tmp_path: Path) -> None:
     Image.new("RGB", (2, 2), (255, 0, 0)).save(path)
     row = RecognitionRow(
         key="tcgplayer:12345:face:0",
-        primary_id=PrimaryID("tcgplayer", "12345"),
-        secondary_ids={},
+        identifiers={"tcgplayer_product": "12345"},
         face_index=0,
         image_url="https://tcgplayer-cdn.tcgplayer.com/product/12345_in_1000x1000.jpg",
         image_fingerprint="fingerprint",
@@ -133,6 +201,31 @@ def test_tcgplayer_cache_resolves_sharded_product_image(tmp_path: Path) -> None:
     path.write_bytes(b"")
     assert not cache.is_cached(row)
 
+
+def test_image_cache_rejects_unsafe_source_identifiers(tmp_path: Path) -> None:
+    images_root = tmp_path / "scryfall" / "images" / "png"
+    (images_root / "front").mkdir(parents=True)
+    (images_root / "back").mkdir()
+    unsafe_scryfall = replace(
+        make_row(),
+        identifiers={"scryfall_card": "../../escape"},
+    )
+    with pytest.raises(ValidationError, match="invalid Scryfall card ID"):
+        updater.ScryfallImageCache(tmp_path, [unsafe_scryfall]).path_for_row(
+            unsafe_scryfall
+        )
+
+    unsafe_tcgplayer = RecognitionRow(
+        key="tcgplayer:unsafe:face:0",
+        identifiers={"tcgplayer_product": "../../escape"},
+        face_index=0,
+        image_url="https://example.test/card.jpg",
+        image_fingerprint="fingerprint",
+    )
+    with pytest.raises(ValidationError, match="invalid TCGplayer product ID"):
+        updater.TCGplayerImageCache(tmp_path, [unsafe_tcgplayer]).path_for_row(
+            unsafe_tcgplayer
+        )
 
 def test_tcgplayer_download_falls_back_to_second_suffix(monkeypatch: pytest.MonkeyPatch) -> None:
     requested: list[str] = []
@@ -218,9 +311,16 @@ def test_full_build_writes_release_index_and_summary(tmp_path: Path) -> None:
     )
     index = json.loads((output_dir / "catalog-index-v2.json").read_text(encoding="utf-8"))
     assert summary["changed"] is True
+    assert summary["source_updated_at"] == "2000-01-01T00:00:00Z"
+    assert summary["catalogs"][0]["source_revision"]["identity"] == (
+        "injected-test-source"
+    )
     assert index["catalogs"]["milo1/scryfall/mtg"]["manifest_filename"] == (
         "milo1--scryfall--mtg.manifest.json"
     )
     assert json.loads((output_dir / "update-summary.json").read_text()) == summary
     quality_report = json.loads((output_dir / "quality-report.json").read_text())
     assert quality_report["catalogs"]["milo1/scryfall/mtg"]["excluded_rows"] == 0
+    assert quality_report["catalogs"]["milo1/scryfall/mtg"]["source_revision"] == (
+        summary["catalogs"][0]["source_revision"]
+    )

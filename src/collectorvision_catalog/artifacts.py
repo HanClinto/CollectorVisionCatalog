@@ -6,6 +6,7 @@ import json
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 from typing import Any, Protocol
@@ -51,19 +52,123 @@ class ImageLoader(Protocol):
     def __call__(self, image_url: str) -> Image.Image: ...
 
 
+def normalize_rfc3339_utc(value: str) -> str:
+    """Normalize an RFC3339 timestamp to its canonical UTC representation."""
+    text = _require_non_empty_string(value, "source updated_at")
+    if re.fullmatch(
+        r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?"
+        r"(?:[Zz]|[+-]\d{2}:?\d{2})",
+        text,
+    ) is None:
+        raise ValidationError("source updated_at must be an RFC3339 timestamp")
+    candidate = text
+    if re.fullmatch(r".*[+-]\d{4}", candidate):
+        candidate = f"{candidate[:-2]}:{candidate[-2:]}"
+    if candidate.endswith(("Z", "z")):
+        candidate = f"{candidate[:-1]}+00:00"
+    try:
+        parsed = datetime.fromisoformat(candidate)
+    except ValueError as error:
+        raise ValidationError("source updated_at must be an RFC3339 timestamp") from error
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValidationError("source updated_at must include a UTC offset")
+    normalized = parsed.astimezone(timezone.utc).isoformat(timespec="microseconds")
+    normalized = normalized.removesuffix("+00:00")
+    if "." in normalized:
+        normalized = normalized.rstrip("0").rstrip(".")
+    normalized = f"{normalized}Z"
+    return normalized
+
+
+def max_source_updated_at(revisions: Iterable[SourceRevision]) -> str:
+    values = [revision.updated_at for revision in revisions]
+    if not values:
+        raise ValidationError("at least one source revision is required")
+    return max(values, key=lambda value: datetime.fromisoformat(value.replace("Z", "+00:00")))
+
+
 @dataclass(frozen=True)
-class PrimaryID:
-    namespace: str
-    value: str
+class SourceRevision:
+    source_type: str
+    source_name: str
+    updated_at: str
+    uri: str
+    identity: str
+
+    def __post_init__(self) -> None:
+        for value, label in (
+            (self.source_type, "source type"),
+            (self.source_name, "source name"),
+            (self.uri, "source uri"),
+            (self.identity, "source identity"),
+        ):
+            if _require_non_empty_string(value, label) != value:
+                raise ValidationError(f"{label} must not contain surrounding whitespace")
+        if normalize_rfc3339_utc(self.updated_at) != self.updated_at:
+            raise ValidationError("source updated_at must be normalized RFC3339 UTC")
 
     def to_dict(self) -> dict[str, str]:
-        return {"namespace": self.namespace, "value": self.value}
+        return {
+            "type": self.source_type,
+            "name": self.source_name,
+            "updated_at": self.updated_at,
+            "uri": self.uri,
+            "identity": self.identity,
+        }
 
     @classmethod
-    def from_dict(cls, payload: Mapping[str, Any]) -> PrimaryID:
+    def from_dict(cls, payload: Mapping[str, Any]) -> SourceRevision:
+        expected = {"type", "name", "updated_at", "uri", "identity"}
+        if set(payload) != expected:
+            raise ValidationError(
+                f"source revision fields must be exactly {sorted(expected)}"
+            )
         return cls(
-            namespace=_require_non_empty_string(payload.get("namespace"), "primary_id.namespace"),
-            value=_require_non_empty_string(payload.get("value"), "primary_id.value"),
+            source_type=_require_non_empty_string(payload.get("type"), "source type"),
+            source_name=_require_non_empty_string(payload.get("name"), "source name"),
+            updated_at=_require_non_empty_string(
+                payload.get("updated_at"), "source updated_at"
+            ),
+            uri=_require_non_empty_string(payload.get("uri"), "source uri"),
+            identity=_require_non_empty_string(payload.get("identity"), "source identity"),
+        )
+
+
+@dataclass(frozen=True)
+class CatalogDescriptor:
+    game: str
+    source: str
+    profile: str
+    description: str
+    result_identifier: str
+    recommended: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "game": self.game,
+            "source": self.source,
+            "profile": self.profile,
+            "description": self.description,
+            "result_identifier": self.result_identifier,
+            "recommended": self.recommended,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> CatalogDescriptor:
+        recommended = payload.get("recommended", False)
+        if not isinstance(recommended, bool):
+            raise ValidationError("descriptor.recommended must be a boolean")
+        return cls(
+            game=_require_non_empty_string(payload.get("game"), "descriptor.game"),
+            source=_require_non_empty_string(payload.get("source"), "descriptor.source"),
+            profile=_require_non_empty_string(payload.get("profile"), "descriptor.profile"),
+            description=_require_non_empty_string(
+                payload.get("description"), "descriptor.description"
+            ),
+            result_identifier=_require_non_empty_string(
+                payload.get("result_identifier"), "descriptor.result_identifier"
+            ),
+            recommended=recommended,
         )
 
 
@@ -95,8 +200,7 @@ class StateRecord:
 @dataclass(frozen=True)
 class RecognitionRow:
     key: str
-    primary_id: PrimaryID
-    secondary_ids: dict[str, str]
+    identifiers: dict[str, str]
     face_index: int
     image_url: str
     image_fingerprint: str
@@ -105,8 +209,7 @@ class RecognitionRow:
     def minimal_record(self) -> dict[str, Any]:
         record = {
             "key": self.key,
-            "primary_id": self.primary_id.to_dict(),
-            "secondary_ids": dict(sorted(self.secondary_ids.items())),
+            "identifiers": dict(sorted(self.identifiers.items())),
         }
         if self.face_index:
             record["face_index"] = self.face_index
@@ -127,8 +230,7 @@ class RecognitionRow:
     def with_metadata(self, metadata: dict[str, JSONValue] | None) -> RecognitionRow:
         return RecognitionRow(
             key=self.key,
-            primary_id=self.primary_id,
-            secondary_ids=dict(self.secondary_ids),
+            identifiers=dict(self.identifiers),
             face_index=self.face_index,
             image_url=self.image_url,
             image_fingerprint=self.image_fingerprint,
@@ -143,19 +245,18 @@ class RecognitionRow:
         metadata: Mapping[str, Any] | None = None,
     ) -> RecognitionRow:
         key = _require_non_empty_string(minimal_payload.get("key"), "key")
-        primary_id = PrimaryID.from_dict(
-            _require_mapping(minimal_payload.get("primary_id"), "primary_id")
-        )
-        secondary_ids = {
-            _require_non_empty_string(namespace, "secondary_ids key"): _require_non_empty_string(
+        identifiers = {
+            _require_non_empty_string(namespace, "identifiers key"): _require_non_empty_string(
                 value,
-                f"secondary_ids[{namespace!r}]",
+                f"identifiers[{namespace!r}]",
             )
             for namespace, value in _require_mapping(
-                minimal_payload.get("secondary_ids", {}),
-                "secondary_ids",
+                minimal_payload.get("identifiers"),
+                "identifiers",
             ).items()
         }
+        if not identifiers:
+            raise ValidationError("identifiers must be a non-empty object")
         face_index = minimal_payload.get("face_index", 0)
         if (
             not isinstance(face_index, int)
@@ -175,8 +276,7 @@ class RecognitionRow:
         normalized_metadata = None if metadata is None else _canonicalize_metadata(metadata)
         return cls(
             key=key,
-            primary_id=primary_id,
-            secondary_ids=dict(sorted(secondary_ids.items())),
+            identifiers=dict(sorted(identifiers.items())),
             face_index=face_index,
             image_url=state.image_url,
             image_fingerprint=state.image_fingerprint,
@@ -206,6 +306,13 @@ class AssetInfo:
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> AssetInfo:
         filename = _require_non_empty_string(payload.get("filename"), "asset filename")
+        if (
+            filename in {".", ".."}
+            or "/" in filename
+            or "\\" in filename
+            or Path(filename).is_absolute()
+        ):
+            raise ValidationError("asset filename must be a flat filename")
         size = payload.get("size")
         if not isinstance(size, int) or size < 0:
             raise ValidationError(f"asset {filename!r} size must be a non-negative integer")
@@ -256,6 +363,12 @@ class DeltaInfo:
         metadata_operations = payload.get("metadata_operations")
         if not isinstance(metadata_operations, int) or metadata_operations < 0:
             raise ValidationError("delta.metadata_operations must be a non-negative integer")
+        if base_version is None and (
+            requires_exact_base or operations != 0 or metadata_operations != 0
+        ):
+            raise ValidationError("seed delta must be empty and not require a base")
+        if base_version is not None and not requires_exact_base:
+            raise ValidationError("versioned delta must require its exact base")
         return cls(
             base_version=base_version,
             requires_exact_base=requires_exact_base,
@@ -271,6 +384,8 @@ class CatalogManifest:
     version: str
     previous_version: str | None
     embedding_model: str
+    source_revision: SourceRevision
+    descriptor: CatalogDescriptor
     rows: int
     dim: int
     dtype: str
@@ -284,6 +399,8 @@ class CatalogManifest:
             "version": self.version,
             "previous_version": self.previous_version,
             "embedding_model": self.embedding_model,
+            "source_revision": self.source_revision.to_dict(),
+            "descriptor": self.descriptor.to_dict(),
             "rows": self.rows,
             "dim": self.dim,
             "dtype": self.dtype,
@@ -308,6 +425,9 @@ class CatalogManifest:
         previous_version = payload.get("previous_version")
         if previous_version is not None and not isinstance(previous_version, str):
             raise ValidationError("previous_version must be a string or null")
+        delta = DeltaInfo.from_dict(_require_mapping(payload.get("delta"), "delta"))
+        if previous_version != delta.base_version:
+            raise ValidationError("previous_version must match delta.base_version")
         assets = {
             _require_non_empty_string(name, "asset key"): AssetInfo.from_dict(
                 _require_mapping(asset_payload, f"assets[{name!r}]")
@@ -326,11 +446,17 @@ class CatalogManifest:
                 payload.get("embedding_model"),
                 "embedding_model",
             ),
+            source_revision=SourceRevision.from_dict(
+                _require_mapping(payload.get("source_revision"), "source_revision")
+            ),
+            descriptor=CatalogDescriptor.from_dict(
+                _require_mapping(payload.get("descriptor"), "descriptor")
+            ),
             rows=rows,
             dim=dim,
             dtype=dtype,
             assets=assets,
-            delta=DeltaInfo.from_dict(_require_mapping(payload.get("delta"), "delta")),
+            delta=delta,
         )
 
 
@@ -384,6 +510,8 @@ def build_catalog(
     catalog_key: str,
     version: str,
     embedding_model: str,
+    source_revision: SourceRevision,
+    descriptor: CatalogDescriptor,
     seed_embeddings: Mapping[str, ArrayLike] | None = None,
     previous_build: CatalogBuild | None = None,
     image_loader: ImageLoader | None = None,
@@ -397,6 +525,18 @@ def build_catalog(
     normalized_rows = _prepare_rows(rows)
     if not normalized_rows:
         raise ValidationError("source rows must not be empty")
+    if not isinstance(descriptor, CatalogDescriptor):
+        raise ValidationError("descriptor must be a CatalogDescriptor")
+    if not isinstance(source_revision, SourceRevision):
+        raise ValidationError("source_revision must be a SourceRevision")
+    missing_result_ids = [
+        row.key for row in normalized_rows if descriptor.result_identifier not in row.identifiers
+    ]
+    if missing_result_ids:
+        raise ValidationError(
+            f"rows are missing result identifier {descriptor.result_identifier!r}: "
+            f"{missing_result_ids[:10]}"
+        )
     if previous_build is not None and seed_embeddings is not None:
         raise ValidationError("seed_embeddings cannot be combined with previous_build")
     if previous_build is not None:
@@ -404,6 +544,7 @@ def build_catalog(
             previous_build,
             catalog_key=catalog_key,
             embedding_model=embedding_model,
+            descriptor=descriptor,
         )
     image_loader = image_loader or default_image_loader
     embeddings = _build_embeddings(
@@ -434,6 +575,8 @@ def build_catalog(
         version=version,
         previous_version=None if previous_build is None else previous_build.manifest.version,
         embedding_model=embedding_model,
+        source_revision=source_revision,
+        descriptor=descriptor,
         rows=len(normalized_rows),
         dim=int(embeddings.shape[1]),
         dtype="float16",
@@ -443,7 +586,7 @@ def build_catalog(
         },
         delta=DeltaInfo(
             base_version=None if previous_build is None else previous_build.manifest.version,
-            requires_exact_base=True,
+            requires_exact_base=previous_build is not None,
             operations=len(delta_operations),
             metadata_operations=len(metadata_operations),
         ),
@@ -516,13 +659,13 @@ def load_catalog_build(
         state = state_by_key.get(key)
         if state is None:
             raise ValidationError(f"missing state entry for key {key!r}")
-        rows.append(
-            RecognitionRow.from_artifact_records(
-                payload,
-                state,
-                metadata=metadata_by_key.get(key),
-            )
+        row = RecognitionRow.from_artifact_records(
+            payload,
+            state,
+            metadata=metadata_by_key.get(key),
         )
+        _validate_result_identifier(row, manifest.descriptor, "recognition row")
+        rows.append(row)
     if len(rows) != manifest.rows:
         raise ValidationError(
             f"manifest rows={manifest.rows} does not match recognition row count {len(rows)}"
@@ -572,6 +715,7 @@ def load_delta_bundle(
         if not isinstance(embedding_index, int) or embedding_index < 0:
             raise ValidationError("delta upsert embedding_index must be a non-negative integer")
         row = RecognitionRow.from_artifact_records(record, state_payload)
+        _validate_result_identifier(row, manifest.descriptor, "delta upsert")
         if row.key in seen_keys:
             raise ValidationError(f"duplicate delta operation for key {row.key!r}")
         seen_keys.add(row.key)
@@ -615,8 +759,7 @@ def apply_delta(
 ) -> CatalogBuild:
     manifest = load_manifest(manifest_path)
     if manifest.delta.base_version is None:
-        if previous_build is not None:
-            raise ValidationError("delta without a base_version requires previous_build=None")
+        raise ValidationError("seed releases must be installed from the full snapshot")
     else:
         if previous_build is None:
             raise ValidationError("previous_build is required for a versioned delta")
@@ -624,6 +767,7 @@ def apply_delta(
             previous_build,
             catalog_key=manifest.catalog_key,
             embedding_model=manifest.embedding_model,
+            descriptor=manifest.descriptor,
         )
         if previous_build.manifest.version != manifest.delta.base_version:
             raise ValidationError(
@@ -732,6 +876,7 @@ def _validate_previous_build(
     *,
     catalog_key: str,
     embedding_model: str,
+    descriptor: CatalogDescriptor | None = None,
 ) -> None:
     if previous_build.manifest.catalog_key != catalog_key:
         raise ValidationError("previous build catalog_key does not match current catalog_key")
@@ -740,6 +885,20 @@ def _validate_previous_build(
     if previous_build.manifest.embedding_model != embedding_model:
         raise ValidationError(
             "previous build embedding_model does not match current embedding_model"
+        )
+    if descriptor is not None and previous_build.manifest.descriptor != descriptor:
+        raise ValidationError("previous build descriptor does not match current descriptor")
+
+
+def _validate_result_identifier(
+    row: RecognitionRow,
+    descriptor: CatalogDescriptor,
+    record_type: str,
+) -> None:
+    if descriptor.result_identifier not in row.identifiers:
+        raise ValidationError(
+            f"{record_type} {row.key!r} is missing result identifier "
+            f"{descriptor.result_identifier!r}"
         )
 
 
@@ -912,9 +1071,9 @@ def _build_deltas(
     embeddings: NDArray[np.float16],
     previous_build: CatalogBuild | None,
 ) -> tuple[list[dict[str, Any]], NDArray[np.float16], list[dict[str, Any]]]:
-    previous_rows: dict[str, RecognitionRow] = {}
-    if previous_build is not None:
-        previous_rows = {row.key: row for row in previous_build.rows}
+    if previous_build is None:
+        return [], np.empty((0, embeddings.shape[1]), dtype=np.float16), []
+    previous_rows = {row.key: row for row in previous_build.rows}
     delta_operations: list[dict[str, Any]] = []
     delta_embedding_rows: list[NDArray[np.float16]] = []
     previous_keys = set(previous_rows)

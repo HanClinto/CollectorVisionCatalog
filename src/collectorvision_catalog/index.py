@@ -8,10 +8,14 @@ from pathlib import Path
 from typing import Any
 
 from .artifacts import (
+    CatalogDescriptor,
+    CatalogManifest,
+    SourceRevision,
     ValidationError,
     _canonical_json_bytes,
     _require_mapping,
     _require_non_empty_string,
+    max_source_updated_at,
 )
 
 
@@ -19,11 +23,15 @@ from .artifacts import (
 class CatalogIndexEntry:
     manifest_filename: str
     sha256: str
+    descriptor: CatalogDescriptor
+    source_revision: SourceRevision
 
-    def to_dict(self) -> dict[str, str]:
+    def to_dict(self) -> dict[str, Any]:
         return {
             "manifest_filename": self.manifest_filename,
             "sha256": self.sha256,
+            "descriptor": self.descriptor.to_dict(),
+            "source_revision": self.source_revision.to_dict(),
         }
 
     @classmethod
@@ -37,6 +45,12 @@ class CatalogIndexEntry:
         return cls(
             manifest_filename=manifest_filename,
             sha256=_require_non_empty_string(payload.get("sha256"), "catalog index sha256"),
+            descriptor=CatalogDescriptor.from_dict(
+                _require_mapping(payload.get("descriptor"), "catalog index descriptor")
+            ),
+            source_revision=SourceRevision.from_dict(
+                _require_mapping(payload.get("source_revision"), "catalog index source_revision")
+            ),
         )
 
 
@@ -44,12 +58,14 @@ class CatalogIndexEntry:
 class CatalogIndex:
     schema_version: int
     release_version: str
+    source_updated_at: str
     catalogs: dict[str, CatalogIndexEntry]
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "schema_version": self.schema_version,
             "release_version": self.release_version,
+            "source_updated_at": self.source_updated_at,
             "catalogs": {
                 catalog_key: entry.to_dict() for catalog_key, entry in sorted(self.catalogs.items())
             },
@@ -70,12 +86,26 @@ class CatalogIndex:
                 payload.get("catalogs"), "catalogs"
             ).items()
         }
+        release_version = _require_non_empty_string(
+            payload.get("release_version"),
+            "release_version",
+        )
+        source_updated_at = _require_non_empty_string(
+            payload.get("source_updated_at"), "source_updated_at"
+        )
+        expected_updated_at = (
+            max_source_updated_at(entry.source_revision for entry in catalogs.values())
+            if catalogs
+            else None
+        )
+        if source_updated_at != expected_updated_at:
+            raise ValidationError(
+                "catalog index source_updated_at must equal the maximum catalog source timestamp"
+            )
         return cls(
             schema_version=schema_version,
-            release_version=_require_non_empty_string(
-                payload.get("release_version"),
-                "release_version",
-            ),
+            release_version=release_version,
+            source_updated_at=source_updated_at,
             catalogs=catalogs,
         )
 
@@ -91,14 +121,30 @@ def write_catalog_index(
         stable_key = _require_non_empty_string(catalog_key, "catalog index key")
         manifest_file = Path(manifest_path)
         manifest_bytes = manifest_file.read_bytes()
+        manifest = CatalogManifest.from_dict(
+            _require_mapping(json.loads(manifest_bytes), "manifest")
+        )
+        if manifest.catalog_key != stable_key:
+            raise ValidationError("manifest catalog_key does not match catalog index key")
         filename = manifest_file.name
         if manifest_file.name != filename:
             raise ValidationError("manifest path must resolve to a flat filename")
         entries[stable_key] = CatalogIndexEntry(
             manifest_filename=filename,
             sha256=sha256(manifest_bytes).hexdigest(),
+            descriptor=manifest.descriptor,
+            source_revision=manifest.source_revision,
         )
-    index = CatalogIndex(schema_version=2, release_version=release_version, catalogs=entries)
+    if not entries:
+        raise ValidationError("catalog index must contain at least one catalog")
+    index = CatalogIndex(
+        schema_version=2,
+        release_version=release_version,
+        source_updated_at=max_source_updated_at(
+            entry.source_revision for entry in entries.values()
+        ),
+        catalogs=entries,
+    )
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(_canonical_json_bytes(index.to_dict()))

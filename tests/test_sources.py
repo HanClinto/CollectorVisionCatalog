@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import pytest
+
+from collectorvision_catalog import SourceRevision, ValidationError, normalize_rfc3339_utc
 from collectorvision_catalog.sources import (
     build_tcgplayer_image_urls,
     is_probable_card_product,
@@ -7,12 +10,30 @@ from collectorvision_catalog.sources import (
     normalize_tcgcsv_product,
 )
 
+CARD_ID = "00000000-0000-0000-0000-000000000123"
+ORACLE_ID = "11111111-1111-1111-1111-111111111999"
 
-def test_normalize_scryfall_card_faces_and_secondary_ids() -> None:
+
+def test_source_timestamp_normalization_and_strict_revision() -> None:
+    assert normalize_rfc3339_utc("2026-07-24T20:11:00+0000") == "2026-07-24T20:11:00Z"
+    assert normalize_rfc3339_utc("2026-07-24T22:11:00+02:00") == (
+        "2026-07-24T20:11:00Z"
+    )
+    with pytest.raises(ValidationError, match="normalized"):
+        SourceRevision(
+            source_type="tcgcsv",
+            source_name="tcgplayer",
+            updated_at="2026-07-24T20:11:00+00:00",
+            uri="https://tcgcsv.com/last-updated.txt",
+            identity="revision",
+        )
+
+
+def test_normalize_scryfall_card_faces_and_identifiers() -> None:
     card = {
-        "id": "card-123",
+        "id": CARD_ID,
         "name": "Sample Card",
-        "oracle_id": "oracle-999",
+        "oracle_id": ORACLE_ID,
         "tcgplayer_id": 1001,
         "tcgplayer_etched_id": 2002,
         "set": "neo",
@@ -40,15 +61,19 @@ def test_normalize_scryfall_card_faces_and_secondary_ids() -> None:
 
     rows = normalize_scryfall_card(card)
 
-    assert [row.key for row in rows] == ["scryfall:card-123:face:0", "scryfall:card-123:face:1"]
+    assert [row.key for row in rows] == [
+        f"scryfall:{CARD_ID}:face:0",
+        f"scryfall:{CARD_ID}:face:1",
+    ]
     assert rows[0].face_index == 0
     assert rows[1].face_index == 1
     assert "face_index" not in rows[0].minimal_record()
     assert rows[1].minimal_record()["face_index"] == 1
     assert rows[0].image_url == "https://img/front.png"
     assert rows[1].image_url == "https://img/back-large.png"
-    assert rows[0].secondary_ids == {
-        "scryfall_oracle": "oracle-999",
+    assert rows[0].identifiers == {
+        "scryfall_card": CARD_ID,
+        "scryfall_oracle": ORACLE_ID,
         "tcgplayer_etched_product": "2002",
         "tcgplayer_product": "1001",
     }
@@ -65,7 +90,7 @@ def test_normalize_scryfall_card_faces_and_secondary_ids() -> None:
 
 def test_scryfall_image_revision_changes_fingerprint() -> None:
     card = {
-        "id": "card-123",
+        "id": CARD_ID,
         "name": "Sample Card",
         "image_uris": {"png": "https://cards.scryfall.io/png/front/a/b/card.png?100"},
     }
@@ -99,7 +124,8 @@ def test_normalize_tcgcsv_product_images_and_filtering() -> None:
     ]
     assert [row.image_url for row in rows] == build_tcgplayer_image_urls("123456", 2)
     assert rows[1].face_index == 1
-    assert rows[0].secondary_ids == {
+    assert rows[0].identifiers == {
+        "tcgplayer_product": "123456",
         "tcgplayer_category": "10",
         "tcgplayer_group": "20",
     }
@@ -145,3 +171,23 @@ def test_tcgcsv_product_without_images_is_skipped() -> None:
         "extendedData": [{"name": "Number", "value": "1"}],
     }
     assert normalize_tcgcsv_product(product) == []
+
+
+def test_source_identifiers_reject_path_components() -> None:
+    with pytest.raises(ValidationError, match="must be a UUID"):
+        normalize_scryfall_card(
+            {
+                "id": "../../escape",
+                "name": "Unsafe",
+                "image_uris": {"png": "https://example.test/card.png"},
+            }
+        )
+    with pytest.raises(ValidationError, match="positive decimal"):
+        normalize_tcgcsv_product(
+            {
+                "productId": "../../escape",
+                "name": "Unsafe",
+                "imageCount": 1,
+                "extendedData": [{"name": "Number", "value": "1"}],
+            }
+        )

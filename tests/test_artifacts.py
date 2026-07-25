@@ -14,22 +14,41 @@ from conftest import (
     UnnormalizedEmbedder,
     make_row,
 )
+from conftest import (
+    build_test_catalog as build_catalog,
+)
 
 from collectorvision_catalog import (
     AssetIntegrityError,
     CatalogBuild,
+    CatalogDescriptor,
     RecognitionRow,
     ValidationError,
     apply_delta,
-    build_catalog,
     load_catalog_build,
     load_delta_bundle,
     manifest_filename_for_catalog,
     validate_artifacts,
 )
+from collectorvision_catalog.artifacts import AssetInfo
 
 CATALOG_KEY = "milo1/scryfall/mtg"
 EMBEDDING_MODEL = "milo1"
+
+
+@pytest.mark.parametrize(
+    "filename", ["nested/asset.gz", "../asset.gz", r"nested\asset.gz", "/asset"]
+)
+def test_asset_info_rejects_non_flat_filenames(filename: str) -> None:
+    with pytest.raises(ValidationError, match="flat filename"):
+        AssetInfo.from_dict(
+            {
+                "filename": filename,
+                "size": 1,
+                "sha256": "abc",
+                "content_type": "application/octet-stream",
+            }
+        )
 
 
 def _build_initial_catalog(
@@ -60,6 +79,26 @@ def _read_gzip_jsonl(path: Path) -> list[dict[str, object]]:
     return [json.loads(line) for line in payload.splitlines()]
 
 
+def _replace_gzip_jsonl_asset(
+    manifest_path: Path,
+    asset_name: str,
+    records: list[dict[str, object]],
+) -> None:
+    manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    asset = manifest_payload["assets"][asset_name]
+    payload = gzip.compress(
+        b"".join(
+            json.dumps(record, separators=(",", ":"), sort_keys=True).encode("utf-8") + b"\n"
+            for record in records
+        ),
+        mtime=0,
+    )
+    (manifest_path.parent / asset["filename"]).write_bytes(payload)
+    asset["size"] = len(payload)
+    asset["sha256"] = sha256(payload).hexdigest()
+    manifest_path.write_text(json.dumps(manifest_payload), encoding="utf-8")
+
+
 def _normalized_embedding_for_color(color: tuple[int, int, int]) -> np.ndarray:
     embedding = np.array(
         [color[0] / 255.0, color[1] / 255.0, color[2] / 255.0, 0.5],
@@ -75,14 +114,14 @@ def test_build_outputs_are_deterministic_and_loadable(workspace: Path) -> None:
             "beta",
             "memory://beta",
             "fp-beta",
-            secondary_ids={"scryfall_oracle": "o2"},
+            identifiers={"scryfall_oracle": "o2"},
             metadata={"name": "Beta", "tags": ["blue", "rare"]},
         ),
         make_row(
             "alpha",
             "memory://alpha",
             "fp-alpha",
-            secondary_ids={"scryfall_oracle": "o1"},
+            identifiers={"scryfall_oracle": "o1"},
             metadata={"name": "Alpha"},
         ),
     ]
@@ -144,16 +183,14 @@ def test_build_outputs_are_deterministic_and_loadable(workspace: Path) -> None:
         build_a.embeddings.astype(np.float32),
         atol=1e-3,
     )
-    assert len(delta.operations) == 2
-    assert delta.embeddings.shape == (2, 4)
+    assert len(delta.operations) == 0
+    assert delta.embeddings.shape == (0, 4)
     assert loaded.rows[0].metadata == {"name": "Alpha"}
     assert all(
         "image_url" not in record and "image_fingerprint" not in record
         for record in recognition_records
     )
-    assert all("state" in record for record in delta_records)
-    assert all("image_url" not in record["record"] for record in delta_records)
-    assert delta_records[0]["state"]["image_url"] == "memory://alpha"
+    assert delta_records == []
 
 
 def test_reuses_previous_embeddings_on_metadata_only_change(workspace: Path) -> None:
@@ -223,22 +260,107 @@ def test_seed_embeddings_reuse_initial_rows_and_keep_artifacts_valid(workspace: 
 
     manifest_path = workspace / "seeded" / manifest_filename_for_catalog(CATALOG_KEY)
     loaded = validate_artifacts(manifest_path)
-    reconstructed = apply_delta(None, manifest_path)
     delta = load_delta_bundle(manifest_path)
 
     assert loader.calls == ["memory://beta"]
     assert embedder.calls == [[(0, 255, 0)]]
     assert build.manifest.previous_version is None
     assert build.manifest.delta.base_version is None
-    assert len(delta.operations) == 2
-    assert delta.embeddings.shape == (2, 4)
-    assert np.array_equal(loaded.embeddings, reconstructed.embeddings)
-    assert loaded.rows == reconstructed.rows
+    assert build.manifest.delta.requires_exact_base is False
+    assert len(delta.operations) == 0
+    assert len(delta.metadata_operations) == 0
+    assert delta.embeddings.shape == (0, 4)
+    with pytest.raises(ValidationError, match="installed from the full snapshot"):
+        apply_delta(None, manifest_path)
     assert np.allclose(
         loaded.embeddings[0].astype(np.float32),
         _normalized_embedding_for_color(image_map["memory://alpha"]),
         atol=1e-3,
     )
+
+
+def test_identifiers_serialize_and_result_identifier_is_required(workspace: Path) -> None:
+    row = make_row(
+        "alpha",
+        "memory://alpha",
+        "fp-alpha",
+        identifiers={"scryfall_card": "card-1", "scryfall_oracle": "oracle-1"},
+    )
+    descriptor = CatalogDescriptor(
+        game="magic-the-gathering",
+        source="scryfall",
+        profile="printings",
+        description="Test printings.",
+        result_identifier="scryfall_card",
+        recommended=True,
+    )
+    build = build_catalog(
+        [row],
+        embedder=TrackingEmbedder(),
+        image_loader=TrackingImageLoader({"memory://alpha": (255, 0, 0)}),
+        output_dir=workspace / "valid-identifiers",
+        catalog_key=CATALOG_KEY,
+        version="v1",
+        embedding_model=EMBEDDING_MODEL,
+        descriptor=descriptor,
+    )
+    assert build.rows[0].minimal_record()["identifiers"] == {
+        "scryfall_card": "card-1",
+        "scryfall_oracle": "oracle-1",
+        "test": "alpha",
+    }
+    assert build.manifest.descriptor == descriptor
+
+    with pytest.raises(ValidationError, match="missing result identifier"):
+        build_catalog(
+            [row],
+            embedder=TrackingEmbedder(),
+            image_loader=TrackingImageLoader({"memory://alpha": (255, 0, 0)}),
+            output_dir=workspace / "invalid-identifiers",
+            catalog_key=CATALOG_KEY,
+            version="v1",
+            embedding_model=EMBEDDING_MODEL,
+            descriptor=CatalogDescriptor(
+                game="magic-the-gathering",
+                source="scryfall",
+                profile="cards",
+                description="Test cards.",
+                result_identifier="missing_identifier",
+            ),
+        )
+
+
+def test_loader_enforces_manifest_result_identifier(workspace: Path) -> None:
+    rows = [make_row("alpha", "memory://alpha", "fp-alpha")]
+    _, build_dir, _, _ = _build_initial_catalog(
+        workspace,
+        rows,
+        {"memory://alpha": (255, 0, 0)},
+    )
+    manifest_path = build_dir / manifest_filename_for_catalog(CATALOG_KEY)
+    recognition_path = build_dir / "milo1--scryfall--mtg.recognition.jsonl.gz"
+    recognition_records = _read_gzip_jsonl(recognition_path)
+    recognition_records[0]["identifiers"] = {"other": "alpha"}
+    _replace_gzip_jsonl_asset(manifest_path, "recognition_rows", recognition_records)
+
+    with pytest.raises(ValidationError, match="missing result identifier 'test'"):
+        load_catalog_build(manifest_path)
+
+
+def test_manifest_rejects_conflicting_delta_base_versions(workspace: Path) -> None:
+    rows = [make_row("alpha", "memory://alpha", "fp-alpha")]
+    _, build_dir, _, _ = _build_initial_catalog(
+        workspace,
+        rows,
+        {"memory://alpha": (255, 0, 0)},
+    )
+    manifest_path = build_dir / manifest_filename_for_catalog(CATALOG_KEY)
+    manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest_payload["previous_version"] = "wrong-base"
+    manifest_path.write_text(json.dumps(manifest_payload), encoding="utf-8")
+
+    with pytest.raises(ValidationError, match="must match delta.base_version"):
+        load_catalog_build(manifest_path)
 
 
 def test_seed_embeddings_reject_unknown_keys(workspace: Path) -> None:
@@ -400,7 +522,7 @@ def test_apply_delta_roundtrip_with_add_delete_and_minimal_change(workspace: Pat
             "beta",
             "memory://beta",
             "fp-beta",
-            secondary_ids={"scryfall_oracle": "old"},
+            identifiers={"scryfall_oracle": "old"},
             metadata={"name": "Beta", "rarity": "common"},
         ),
     ]
@@ -416,7 +538,7 @@ def test_apply_delta_roundtrip_with_add_delete_and_minimal_change(workspace: Pat
             "beta",
             "memory://beta",
             "fp-beta",
-            secondary_ids={"scryfall_oracle": "new"},
+            identifiers={"scryfall_oracle": "new"},
             metadata={"name": "Beta", "rarity": "rare"},
         ),
         make_row("gamma", "memory://gamma", "fp-gamma", metadata={"name": "Gamma"}),
