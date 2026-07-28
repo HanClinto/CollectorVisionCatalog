@@ -132,7 +132,6 @@ def test_normalize_tcgcsv_product_images_and_filtering() -> None:
     assert rows[0].metadata == {
         "category": "Pokemon Singles",
         "collector_number": "4/102",
-        "foilings": ["Reverse Holo"],
         "language": "English",
         "name": "Charizard",
         "rarity": "Rare Holo",
@@ -147,6 +146,24 @@ def test_normalize_tcgcsv_product_images_and_filtering() -> None:
     }
     assert is_probable_card_product(not_a_card) is False
     assert normalize_tcgcsv_product(not_a_card, group=group, category=category) == []
+
+
+def test_tcgcsv_does_not_infer_available_finishes_from_product_data() -> None:
+    rows = normalize_tcgcsv_product(
+        {
+            "productId": 123456,
+            "name": "Charizard",
+            "imageCount": 1,
+            "extendedData": [
+                {"name": "Number", "value": "4/102"},
+                {"name": "Printing", "value": "Reverse Holo"},
+                {"name": "Finish", "value": "Foil"},
+            ],
+        }
+    )
+
+    assert "finishes" not in rows[0].metadata
+    assert "foilings" not in rows[0].metadata
 
 
 def test_tcgcsv_product_revision_changes_image_fingerprint() -> None:

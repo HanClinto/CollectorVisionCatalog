@@ -54,9 +54,6 @@ def normalize_tcgcsv_product(
         metadata["rarity"] = rarity
     if language := extended_data.get("Language"):
         metadata["language"] = language
-    foilings = _foilings_from_extended_data(extended_data)
-    if foilings:
-        metadata["foilings"] = foilings
     rows: list[RecognitionRow] = []
     for index, image_url in enumerate(
         build_tcgplayer_image_urls(product_id, image_count=image_count)
@@ -127,18 +124,6 @@ def extract_extended_data(product: Mapping[str, Any]) -> dict[str, str]:
             f"extendedData[{index}].value",
         )
     return extracted
-
-
-def _foilings_from_extended_data(extended_data: Mapping[str, str]) -> list[str]:
-    foilings: list[str] = []
-    if printing := extended_data.get("Printing"):
-        foilings.append(printing)
-    if (finish := extended_data.get("Finish")) and finish not in foilings:
-        foilings.append(finish)
-    if (foil := extended_data.get("Foil")) and foil.lower() in {"true", "yes", "foil"}:
-        if "foil" not in foilings:
-            foilings.append("foil")
-    return foilings
 
 
 def _lookup(payload: Mapping[str, Any], *names: str) -> Any:

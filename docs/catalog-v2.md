@@ -118,7 +118,24 @@ that only need recognition never download it. Common fields include:
 - collector number;
 - rarity;
 - language;
-- available finishes or foilings.
+- available finishes.
+
+### Normalized physical attributes
+
+`finishes` is the canonical metadata field for available physical finishes,
+following Scryfall's terminology. Values are source-normalized strings such as
+`nonfoil`, `foil`, `etched`, and `glossy`. A finish is distinct from:
+
+- `language`, which identifies the language of a specific printing;
+- marketplace condition, which does not change recognition identity;
+- visual variants such as first edition, shadowless, borderless, or showcase.
+
+Scryfall supplies authoritative `finishes` for each printing. TCGplayer finish
+and language availability belongs to SKU data: a product ID groups SKUs across
+printing treatment, language, and condition. TCGCSV explicitly does not publish
+SKUs, so TCGplayer catalogs built from TCGCSV must omit `finishes` rather than
+infer an incomplete list from product-level extended data. Exact TCGplayer
+finish support therefore requires a separately reviewed SKU-capable source.
 
 Source-specific fields may be added compatibly, but prices are not part of the
 official catalog.
