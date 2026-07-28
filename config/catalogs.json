@@ -33,8 +33,9 @@
       "source": {"type": "scryfall", "bulk_type": "oracle_cards", "paper_only": true},
       "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
       "max_changed_rows": 5000,
-      "enabled": false,
-      "seed_required": true
+      "enabled": true,
+      "seed_required": true,
+      "seed_from_catalog": "milo1/scryfall/mtg"
     },
     {
       "key": "milo1/scryfall/mtg-artworks",

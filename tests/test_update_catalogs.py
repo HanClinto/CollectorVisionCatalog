@@ -83,7 +83,14 @@ def test_repository_config_exposes_independent_profiles() -> None:
     }
     assert sum(item.descriptor.recommended for item in scryfall) == 1
     assert all(item.seed_required for item in scryfall)
-    assert all(not item.enabled for item in scryfall if item.descriptor.profile != "printings")
+    cards = next(item for item in scryfall if item.descriptor.profile == "cards")
+    assert cards.enabled
+    assert cards.seed_from_catalog == "milo1/scryfall/mtg"
+    assert all(
+        not item.enabled
+        for item in scryfall
+        if item.descriptor.profile not in {"printings", "cards"}
+    )
 
 
 def test_scryfall_revision_is_extracted_from_selected_bulk_entry(monkeypatch) -> None:
@@ -333,6 +340,84 @@ def test_build_requires_seed_unless_full_rebuild_is_explicit(tmp_path: Path) -> 
             previous_dir=tmp_path / "previous",
             output_dir=tmp_path / "release",
             version="catalog-v2-2026-07-17",
+            source_rows_factory=lambda source: [make_row()],
+            embedder_factory=lambda model, batch: lambda images: np.array([[1.0, 0.0]]),
+            image_loader=lambda url: Image.new("RGB", (2, 2)),
+        )
+
+
+def test_new_subset_catalog_reuses_previous_catalog_embeddings(tmp_path: Path) -> None:
+    previous_dir = tmp_path / "previous"
+    previous_dir.mkdir()
+    row = make_row()
+    seed_config = tmp_path / "seed-config.json"
+    make_config(seed_config)
+    seed_descriptor = updater.load_config(seed_config)[0].descriptor
+    updater.build_catalog(
+        [row],
+        embedder=lambda images: np.array([[0.6, 0.8]], dtype=np.float32),
+        output_dir=previous_dir,
+        catalog_key="milo1/scryfall/mtg",
+        version="catalog-v2-beta.1-2026-07-17",
+        embedding_model=updater.MILO1_MODEL_ID,
+        source_revision=updater.SourceRevision(
+            source_type="scryfall",
+            source_name="default_cards",
+            updated_at="2000-01-01T00:00:00Z",
+            uri="memory://default-cards",
+            identity="default-cards",
+        ),
+        descriptor=seed_descriptor,
+        image_loader=lambda url: Image.new("RGB", (2, 2)),
+    )
+
+    target = json.loads(seed_config.read_text(encoding="utf-8"))
+    catalog = target["catalogs"][0]
+    catalog["key"] = "milo1/scryfall/mtg-cards"
+    catalog["descriptor"]["profile"] = "cards"
+    catalog["descriptor"]["recommended"] = False
+    catalog["source"]["bulk_type"] = "oracle_cards"
+    catalog["seed_from_catalog"] = "milo1/scryfall/mtg"
+    target_config = tmp_path / "target-config.json"
+    target_config.write_text(json.dumps(target), encoding="utf-8")
+
+    def fail_embed(images):
+        raise AssertionError("subset seed should not run inference")
+
+    output_dir = tmp_path / "release"
+    summary = updater.build_enabled_catalogs(
+        config_path=target_config,
+        previous_dir=previous_dir,
+        output_dir=output_dir,
+        version="catalog-v2-beta.2-2026-07-18",
+        source_rows_factory=lambda source: [row],
+        embedder_factory=lambda model, batch: fail_embed,
+        image_loader=lambda url: Image.new("RGB", (2, 2)),
+    )
+
+    build = updater.load_catalog_build(
+        output_dir / "milo1--scryfall--mtg-cards.manifest.json",
+        asset_dir=output_dir,
+    )
+    assert summary["catalogs"][0]["seed_embeddings_reused"] == 1
+    assert build.manifest.previous_version is None
+    assert np.array_equal(build.embeddings, np.array([[0.6, 0.8]], dtype=np.float16))
+
+
+def test_subset_seed_requires_every_target_row_in_seed_catalog(tmp_path: Path) -> None:
+    config_path = tmp_path / "catalogs.json"
+    make_config(config_path)
+    payload = json.loads(config_path.read_text(encoding="utf-8"))
+    payload["catalogs"][0]["key"] = "milo1/scryfall/mtg-cards"
+    payload["catalogs"][0]["seed_from_catalog"] = "milo1/scryfall/mtg"
+    config_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ValidationError, match="requires seed catalog"):
+        updater.build_enabled_catalogs(
+            config_path=config_path,
+            previous_dir=tmp_path / "previous",
+            output_dir=tmp_path / "release",
+            version="catalog-v2-beta.2-2026-07-18",
             source_rows_factory=lambda source: [make_row()],
             embedder_factory=lambda model, batch: lambda images: np.array([[1.0, 0.0]]),
             image_loader=lambda url: Image.new("RGB", (2, 2)),
