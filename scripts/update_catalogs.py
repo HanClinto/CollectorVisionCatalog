@@ -61,6 +61,7 @@ class CatalogConfig:
     enabled: bool
     seed_required: bool
     seed_from_catalog: str | None
+    max_seed_inference_rows: int
     descriptor: CatalogDescriptor
 
 
@@ -121,6 +122,10 @@ def load_config(path: Path) -> list[CatalogConfig]:
                 enabled=bool(raw.get("enabled", False)),
                 seed_required=bool(raw.get("seed_required", True)),
                 seed_from_catalog=seed_from_catalog,
+                max_seed_inference_rows=_non_negative_int(
+                    raw.get("max_seed_inference_rows", 0),
+                    f"catalog {key!r} max_seed_inference_rows",
+                ),
                 descriptor=descriptor,
             )
         )
@@ -430,11 +435,12 @@ def build_enabled_catalogs(
         quality_reports[config.key]["source_revision"] = snapshot.revision.to_dict()
         if seed_embeddings is not None:
             missing_seed_keys = [row.key for row in rows if row.key not in seed_embeddings]
-            if missing_seed_keys:
+            if len(missing_seed_keys) > config.max_seed_inference_rows:
                 raise ValidationError(
-                    f"catalog {config.key!r} is not a row-key subset of seed catalog "
-                    f"{config.seed_from_catalog!r}; missing {len(missing_seed_keys):,} "
-                    f"embedding(s), including {missing_seed_keys[:3]}"
+                    f"catalog {config.key!r} is missing {len(missing_seed_keys):,} "
+                    f"embedding(s) from seed catalog {config.seed_from_catalog!r}, exceeding "
+                    f"its limit of {config.max_seed_inference_rows:,}; "
+                    f"examples: {missing_seed_keys[:3]}"
                 )
         unavailable_keys: set[str] = set()
         if source_type == "tcgcsv" and cache_root is not None:
@@ -540,7 +546,12 @@ def build_enabled_catalogs(
                 "delta_operations": build.manifest.delta.operations,
                 "metadata_delta_operations": build.manifest.delta.metadata_operations,
                 "seed_embeddings_reused": (
-                    0 if seed_embeddings is None else len(rows)
+                    0
+                    if seed_embeddings is None
+                    else len(rows) - len(missing_seed_keys)
+                ),
+                "seed_embeddings_computed": (
+                    0 if seed_embeddings is None else len(missing_seed_keys)
                 ),
                 "changed": previous is None
                 or previous.manifest.source_revision != snapshot.revision

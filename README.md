@@ -35,7 +35,8 @@ available from Hugging Face and is not changed by this repository.
 Catalog descriptors in the release index and manifests expose independent
 physical profiles. The compact Scryfall `cards` profile reuses matching
 embeddings from the published `printings` catalog for its initial snapshot;
-later releases update it independently. The `artworks` profile remains disabled
+the build permits at most 100 missing rows to be downloaded and embedded.
+Later releases update it independently. The `artworks` profile remains disabled
 until it receives a seed. Profile availability does not imply that an embedding
 model can reliably distinguish every edition or language.
 

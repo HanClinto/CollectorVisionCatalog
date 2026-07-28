@@ -86,6 +86,7 @@ def test_repository_config_exposes_independent_profiles() -> None:
     cards = next(item for item in scryfall if item.descriptor.profile == "cards")
     assert cards.enabled
     assert cards.seed_from_catalog == "milo1/scryfall/mtg"
+    assert cards.max_seed_inference_rows == 100
     assert all(
         not item.enabled
         for item in scryfall
@@ -346,7 +347,9 @@ def test_build_requires_seed_unless_full_rebuild_is_explicit(tmp_path: Path) -> 
         )
 
 
-def test_new_subset_catalog_reuses_previous_catalog_embeddings(tmp_path: Path) -> None:
+def test_new_subset_catalog_reuses_seed_and_bounds_missing_embeddings(
+    tmp_path: Path,
+) -> None:
     previous_dir = tmp_path / "previous"
     previous_dir.mkdir()
     row = make_row()
@@ -378,11 +381,18 @@ def test_new_subset_catalog_reuses_previous_catalog_embeddings(tmp_path: Path) -
     catalog["descriptor"]["recommended"] = False
     catalog["source"]["bulk_type"] = "oracle_cards"
     catalog["seed_from_catalog"] = "milo1/scryfall/mtg"
+    catalog["max_seed_inference_rows"] = 1
     target_config = tmp_path / "target-config.json"
     target_config.write_text(json.dumps(target), encoding="utf-8")
-
-    def fail_embed(images):
-        raise AssertionError("subset seed should not run inference")
+    missing_row = replace(
+        row,
+        key="scryfall:cb000000-0000-0000-0000-000000000001:face:0",
+        identifiers={
+            **row.identifiers,
+            "scryfall_card": "cb000000-0000-0000-0000-000000000001",
+        },
+        image_url="memory://missing",
+    )
 
     output_dir = tmp_path / "release"
     summary = updater.build_enabled_catalogs(
@@ -390,8 +400,10 @@ def test_new_subset_catalog_reuses_previous_catalog_embeddings(tmp_path: Path) -
         previous_dir=previous_dir,
         output_dir=output_dir,
         version="catalog-v2-beta.2-2026-07-18",
-        source_rows_factory=lambda source: [row],
-        embedder_factory=lambda model, batch: fail_embed,
+        source_rows_factory=lambda source: [row, missing_row],
+        embedder_factory=lambda model, batch: lambda images: np.array(
+            [[0.0, 1.0]], dtype=np.float32
+        ),
         image_loader=lambda url: Image.new("RGB", (2, 2)),
     )
 
@@ -400,11 +412,15 @@ def test_new_subset_catalog_reuses_previous_catalog_embeddings(tmp_path: Path) -
         asset_dir=output_dir,
     )
     assert summary["catalogs"][0]["seed_embeddings_reused"] == 1
+    assert summary["catalogs"][0]["seed_embeddings_computed"] == 1
     assert build.manifest.previous_version is None
-    assert np.array_equal(build.embeddings, np.array([[0.6, 0.8]], dtype=np.float16))
+    assert np.array_equal(
+        build.embeddings,
+        np.array([[0.6, 0.8], [0.0, 1.0]], dtype=np.float16),
+    )
 
 
-def test_subset_seed_requires_every_target_row_in_seed_catalog(tmp_path: Path) -> None:
+def test_subset_seed_requires_source_catalog_in_previous_release(tmp_path: Path) -> None:
     config_path = tmp_path / "catalogs.json"
     make_config(config_path)
     payload = json.loads(config_path.read_text(encoding="utf-8"))

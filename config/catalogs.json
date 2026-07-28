@@ -35,7 +35,8 @@
       "max_changed_rows": 5000,
       "enabled": true,
       "seed_required": true,
-      "seed_from_catalog": "milo1/scryfall/mtg"
+      "seed_from_catalog": "milo1/scryfall/mtg",
+      "max_seed_inference_rows": 100
     },
     {
       "key": "milo1/scryfall/mtg-artworks",
