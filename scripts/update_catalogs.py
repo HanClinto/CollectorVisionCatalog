@@ -434,6 +434,7 @@ def build_enabled_catalogs(
         quality_reports[config.key] = quality_result.report()
         quality_reports[config.key]["source_revision"] = snapshot.revision.to_dict()
         if seed_embeddings is not None:
+            target_keys = {row.key for row in rows}
             missing_seed_keys = [row.key for row in rows if row.key not in seed_embeddings]
             if len(missing_seed_keys) > config.max_seed_inference_rows:
                 raise ValidationError(
@@ -442,6 +443,11 @@ def build_enabled_catalogs(
                     f"its limit of {config.max_seed_inference_rows:,}; "
                     f"examples: {missing_seed_keys[:3]}"
                 )
+            seed_embeddings = {
+                key: embedding
+                for key, embedding in seed_embeddings.items()
+                if key in target_keys
+            }
         unavailable_keys: set[str] = set()
         if source_type == "tcgcsv" and cache_root is not None:
             availability_cache = TCGplayerImageCache(cache_root, rows)

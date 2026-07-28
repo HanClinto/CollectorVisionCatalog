@@ -353,12 +353,23 @@ def test_new_subset_catalog_reuses_seed_and_bounds_missing_embeddings(
     previous_dir = tmp_path / "previous"
     previous_dir.mkdir()
     row = make_row()
+    extra_seed_row = replace(
+        row,
+        key="scryfall:cc000000-0000-0000-0000-000000000001:face:0",
+        identifiers={
+            **row.identifiers,
+            "scryfall_card": "cc000000-0000-0000-0000-000000000001",
+        },
+        image_url="memory://extra-seed",
+    )
     seed_config = tmp_path / "seed-config.json"
     make_config(seed_config)
     seed_descriptor = updater.load_config(seed_config)[0].descriptor
     updater.build_catalog(
-        [row],
-        embedder=lambda images: np.array([[0.6, 0.8]], dtype=np.float32),
+        [row, extra_seed_row],
+        embedder=lambda images: np.array(
+            [[0.6, 0.8], [1.0, 0.0]], dtype=np.float32
+        ),
         output_dir=previous_dir,
         catalog_key="milo1/scryfall/mtg",
         version="catalog-v2-beta.1-2026-07-17",
