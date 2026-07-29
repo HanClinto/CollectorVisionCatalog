@@ -75,5 +75,13 @@ distributing your own catalog. Catalog v2 is designed for applications that
 want smaller downloads, richer optional data, browser-friendly files, and
 incremental updates.
 
+## How incremental updates work
+
+Your first installation downloads a complete catalog. Later updates normally
+download only cards that changed, with automatic full refreshes when needed.
+Each game and optional metadata package updates independently.
+
+[Learn how catalog updates work](docs/catalog-updates.md).
+
 Contributor setup and architecture are documented in
 [DEVELOPMENT.md](DEVELOPMENT.md).
