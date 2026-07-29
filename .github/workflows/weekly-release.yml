@@ -157,3 +157,25 @@ jobs:
             --title "CollectorVision Catalog v2 ${{ steps.release.outputs.version }}" \
             --notes "Automated full snapshots and one-step deltas. Start with catalog-index-v2.json." \
             release/*
+
+      - name: Update source-controlled catalog feed
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(Path("release/catalog-feed-v2.json").read_text())
+          Path("catalog-feed-v2.json").write_text(
+              json.dumps(payload, indent=2, sort_keys=True) + "\n"
+          )
+          PY
+          if git diff --quiet -- catalog-feed-v2.json; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add catalog-feed-v2.json
+          git commit -m "Update Catalog v2 feed [skip ci]"
+          git pull --rebase origin main
+          git push origin HEAD:main

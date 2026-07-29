@@ -42,10 +42,10 @@ The date suffix is the UTC date of the index's maximum `source_updated_at`, not
 the build date. The index contains that maximum timestamp once; individual
 source provenance remains in each manifest for builders and audits.
 
-Each release also contains `catalog-feed-v2.json`. The latest copy is mirrored
-to Pages as the moving discovery document for normal clients. For each catalog,
-the feed names one complete base manifest and an ordered list of exact-base
-delta manifests:
+Each release also contains an immutable `catalog-feed-v2.json` snapshot. The
+canonical moving copy is committed at the repository root and mirrored to Pages
+for normal clients. For each catalog, the feed names one complete base manifest
+and an ordered list of exact-base delta manifests:
 
 ```json
 {

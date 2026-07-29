@@ -107,3 +107,10 @@ def test_unchanged_catalog_keeps_prior_feed_position(workspace: Path) -> None:
 
     assert current.release_version == "v2"
     assert current.catalogs[CATALOG_KEY] == first_feed.catalogs[CATALOG_KEY]
+
+
+def test_repository_feed_is_valid() -> None:
+    feed = load_catalog_feed(Path(__file__).parents[1] / "catalog-feed-v2.json")
+
+    assert feed.catalogs
+    assert all(entry.base.version for entry in feed.catalogs.values())

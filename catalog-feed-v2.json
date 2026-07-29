@@ -1,0 +1,79 @@
+{
+  "catalogs": {
+    "milo1/scryfall/mtg": {
+      "base": {
+        "manifest_filename": "milo1--scryfall--mtg.manifest.json",
+        "sha256": "fc1cf308290c05201b29214bd80a4f933034bccf610d268651ba91b0b6adf2e3",
+        "version": "catalog-v2-beta.4-2026-07-28"
+      },
+      "deltas": []
+    },
+    "milo1/tcgplayer/digimon-card-game": {
+      "base": {
+        "manifest_filename": "milo1--tcgplayer--digimon-card-game.manifest.json",
+        "sha256": "ca3c3b1adddddeb7b5e45e11b32a5cc3e0aaeab2f2470d6914e4e808edfe8e42",
+        "version": "catalog-v2-beta.4-2026-07-28"
+      },
+      "deltas": []
+    },
+    "milo1/tcgplayer/flesh-and-blood": {
+      "base": {
+        "manifest_filename": "milo1--tcgplayer--flesh-and-blood.manifest.json",
+        "sha256": "3c7c387530bde769ca3516ae9f1cb004cc0bb13d74eb2d3b8ad0834e08268851",
+        "version": "catalog-v2-beta.4-2026-07-28"
+      },
+      "deltas": []
+    },
+    "milo1/tcgplayer/lorcana": {
+      "base": {
+        "manifest_filename": "milo1--tcgplayer--lorcana.manifest.json",
+        "sha256": "1d4ebb881ab2ae48974d772a97aa2a671d55deca913476b7961b90ccaa59c255",
+        "version": "catalog-v2-beta.4-2026-07-28"
+      },
+      "deltas": []
+    },
+    "milo1/tcgplayer/magic-the-gathering": {
+      "base": {
+        "manifest_filename": "milo1--tcgplayer--magic-the-gathering.manifest.json",
+        "sha256": "965ef0bde702ec7ab55ef42e3a23125243535fc1e4da03d74acc7cdc060fa1a5",
+        "version": "catalog-v2-beta.4-2026-07-28"
+      },
+      "deltas": []
+    },
+    "milo1/tcgplayer/one-piece": {
+      "base": {
+        "manifest_filename": "milo1--tcgplayer--one-piece.manifest.json",
+        "sha256": "0b7e8473c2aa8237d70595b2ecf1220b5d4d81ed5975677b665307d033b3d95d",
+        "version": "catalog-v2-beta.4-2026-07-28"
+      },
+      "deltas": []
+    },
+    "milo1/tcgplayer/pokemon": {
+      "base": {
+        "manifest_filename": "milo1--tcgplayer--pokemon.manifest.json",
+        "sha256": "207c6be5559dafb7dcb4b2440f46156b11c77c9d22b6d90f6d6d60d290ddccb0",
+        "version": "catalog-v2-beta.4-2026-07-28"
+      },
+      "deltas": []
+    },
+    "milo1/tcgplayer/star-wars-unlimited": {
+      "base": {
+        "manifest_filename": "milo1--tcgplayer--star-wars-unlimited.manifest.json",
+        "sha256": "ee73c7519d9fcb7944d1eddad267570bd31ef91cdc41be3d02aa31558f30ff6e",
+        "version": "catalog-v2-beta.4-2026-07-28"
+      },
+      "deltas": []
+    },
+    "milo1/tcgplayer/yugioh": {
+      "base": {
+        "manifest_filename": "milo1--tcgplayer--yugioh.manifest.json",
+        "sha256": "04da3d43000d08f4721b968f58b2abc3832cddf2f6d4c7421f79e321f6ba1d44",
+        "version": "catalog-v2-beta.4-2026-07-28"
+      },
+      "deltas": []
+    }
+  },
+  "release_version": "catalog-v2-beta.4-2026-07-28",
+  "schema_version": 2
+}
+

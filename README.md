@@ -116,6 +116,10 @@ full recognition snapshots, optional full metadata, updater state, a bounded
 base-plus-delta discovery feed, and merged quality and seed reports.
 Zero-operation deltas have no assets. The index verifies each manifest, and
 each manifest verifies its assets.
+
+The current discovery feed is also source-controlled at
+[`catalog-feed-v2.json`](catalog-feed-v2.json). Releases retain immutable feed
+snapshots, while the root copy advances after successful publication.
 It also rejects a beta tag whose date differs from the index's maximum upstream
 UTC update date. Expected revisions make a source change between status and
 fetch abort instead of publishing a misleading tag.
