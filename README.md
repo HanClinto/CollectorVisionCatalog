@@ -8,8 +8,8 @@ Catalog v2 keeps recognition downloads small, offers optional card metadata,
 and updates changed cards without repeatedly downloading the entire catalog.
 
 > [!NOTE]
-> Catalog v2 is in beta. Complete catalogs are available now; the final
-> incremental update feed is still being prepared.
+> Catalog v2 is in beta. Browse supported games and recent changes in the
+> [Catalog Explorer](https://hanclinto.github.io/CollectorVisionCatalog/).
 
 ## Use it
 

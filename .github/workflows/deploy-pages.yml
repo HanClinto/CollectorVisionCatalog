@@ -8,6 +8,7 @@ on:
       - ".github/workflows/deploy-pages.yml"
       - "catalog-feed-v2.json"
       - "catalog-publication-v2.json"
+      - "pages/**"
   schedule:
     - cron: "47 11 * * *"
   workflow_dispatch:
@@ -35,9 +36,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           root="site/catalog-v2"
+          cp -R pages/. site/
           mkdir -p "$root"
           cp catalog-feed-v2.json "$root/catalog-feed-v2.json"
-          cp catalog-publication-v2.json "$root/catalog-publication-v2.json"
           mkdir -p release-assets
 
           while IFS= read -r release; do

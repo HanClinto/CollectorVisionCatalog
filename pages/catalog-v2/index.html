@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Explore CollectorVision card recognition catalogs and updates.">
+    <title>CollectorVision Catalog</title>
+    <link rel="stylesheet" href="./catalog-explorer.css">
+    <script type="module" src="./catalog-explorer.js"></script>
+  </head>
+  <body>
+    <header class="hero">
+      <div>
+        <p class="eyebrow">CollectorVision</p>
+        <h1>Catalog Explorer</h1>
+        <p class="lede">
+          See which games are supported, how fresh their data is, and what
+          changed in each catalog update.
+        </p>
+      </div>
+      <aside class="status" aria-live="polite">
+        <span class="status-dot"></span>
+        <span id="catalog-status">Loading catalog status...</span>
+      </aside>
+    </header>
+
+    <main>
+      <section class="intro">
+        <p>
+          Open a game to browse its update history. Full card details are
+          downloaded from the compressed catalog files only when requested.
+        </p>
+        <nav>
+          <a href="./catalog-feed-v2.json">Raw catalog feed</a>
+          <a href="https://github.com/HanClinto/CollectorVisionCatalog">GitHub repository</a>
+        </nav>
+      </section>
+
+      <div id="catalog-sections" aria-live="polite"></div>
+      <div id="catalog-error" class="error" hidden></div>
+    </main>
+
+    <footer>
+      CollectorVision Catalog v2 is currently in beta.
+    </footer>
+  </body>
+</html>
