@@ -83,37 +83,52 @@ The manifest groups artifacts by installation route:
   "base": {
     "embeddings": {
       "path": "base/embeddings.f16.gz",
+      "rows": 110656,
       "size": 25887836,
       "sha256": "..."
     },
     "identifiers": {
       "path": "base/identifiers.jsonl.gz",
+      "rows": 110656,
       "size": 5710019,
       "sha256": "..."
     },
     "metadata": {
       "path": "base/metadata.jsonl.gz",
+      "rows": 110656,
       "size": 5177483,
       "sha256": "..."
     }
   },
   "delta": {
     "from_version": 9,
-    "operations": 62,
-    "metadata_operations": 25,
+    "rows": 62,
+    "recognition": {
+      "added": 25,
+      "updated": 37,
+      "deleted": 0
+    },
+    "metadata": {
+      "added": 25,
+      "updated": 0,
+      "deleted": 0
+    },
     "assets": {
       "embeddings": {
         "path": "delta-from-9/embeddings.f16.gz",
+        "rows": 62,
         "size": 14665,
         "sha256": "..."
       },
       "identifiers": {
         "path": "delta-from-9/identifiers.jsonl.gz",
+        "rows": 62,
         "size": 7119,
         "sha256": "..."
       },
       "metadata": {
         "path": "delta-from-9/metadata.jsonl.gz",
+        "rows": 25,
         "size": 1206,
         "sha256": "..."
       }
@@ -135,6 +150,13 @@ The top-level row count and dimensions describe the catalog after installing
 that version by either available route. `previous_version` records catalog
 history even for a hard checkpoint. A delta's `from_version` must equal
 `previous_version` and must advance exactly one version.
+
+Every asset reports both compressed byte `size` and the number of physical
+`rows` it contains. For a delta, top-level `rows` counts unique affected catalog
+rows across recognition and metadata. Additions and updates share the same
+upsert representation, while the manifest statistics distinguish `added`,
+`updated`, and `deleted`. Assets for layers with no operations are omitted
+instead of publishing empty gzip files.
 
 ## Feed routing
 

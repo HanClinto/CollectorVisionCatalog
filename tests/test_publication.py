@@ -55,6 +55,7 @@ def test_initial_version_publishes_only_readable_base_paths(workspace: Path) -> 
     assert manifest.delta is None
     assert manifest.base is not None
     assert set(manifest.base) == {"embeddings", "identifiers", "metadata"}
+    assert {asset.rows for asset in manifest.base.values()} == {1}
     assert {
         asset.path for asset in manifest.base.values()
     } == {
@@ -77,12 +78,25 @@ def test_incremental_version_publishes_only_delta(workspace: Path) -> None:
         workspace / "public",
         "scryfall-mtg",
         plan_catalog_version(0),
+        previous_build=previous,
     )
 
     assert manifest.base is None
     assert manifest.delta is not None
     assert manifest.delta.from_version == 0
+    assert manifest.delta.rows == 1
+    assert manifest.delta.recognition.to_dict() == {
+        "added": 0,
+        "updated": 1,
+        "deleted": 0,
+    }
+    assert manifest.delta.metadata.to_dict() == {
+        "added": 0,
+        "updated": 1,
+        "deleted": 0,
+    }
     assert set(manifest.delta.assets) == {"embeddings", "identifiers", "metadata"}
+    assert {asset.rows for asset in manifest.delta.assets.values()} == {1}
     assert not (path.parent / "base").exists()
     assert (path.parent / "delta-from-0/embeddings.f16.gz").is_file()
 
@@ -97,6 +111,7 @@ def test_routine_and_hard_checkpoints_have_distinct_routes(workspace: Path) -> N
         workspace / "routine",
         "scryfall-mtg",
         plan_catalog_version(9),
+        previous_build=previous,
     )
     hard, _ = publish_catalog_version(
         build,
@@ -157,10 +172,66 @@ def test_delete_only_delta_does_not_require_embeddings(workspace: Path) -> None:
         workspace / "public",
         "scryfall-mtg",
         plan_catalog_version(0),
+        previous_build=previous,
     )
 
     assert manifest.delta is not None
+    assert manifest.delta.rows == 1
+    assert manifest.delta.recognition.to_dict() == {
+        "added": 0,
+        "updated": 0,
+        "deleted": 1,
+    }
+    assert manifest.delta.metadata.to_dict() == {
+        "added": 0,
+        "updated": 0,
+        "deleted": 0,
+    }
     assert set(manifest.delta.assets) == {"identifiers"}
+    assert manifest.delta.assets["identifiers"].rows == 1
+    assert load_catalog_version_manifest(path) == manifest
+
+
+def test_metadata_only_delta_omits_recognition_assets(workspace: Path) -> None:
+    previous, _ = _build(workspace, 0)
+    build_dir = workspace / "builder-1"
+    build = build_test_catalog(
+        [
+            make_row(
+                "alpha",
+                "memory://alpha",
+                "fp-0",
+                metadata={"name": "Renamed"},
+            )
+        ],
+        embedder=TrackingEmbedder(),
+        image_loader=TrackingImageLoader({"memory://alpha": (255, 0, 0)}),
+        output_dir=build_dir,
+        catalog_key="milo1/scryfall/mtg",
+        version="1",
+        embedding_model="milo1",
+        previous_build=previous,
+    )
+
+    manifest, path = publish_catalog_version(
+        build,
+        build_dir,
+        workspace / "public",
+        "scryfall-mtg",
+        plan_catalog_version(0),
+        previous_build=previous,
+    )
+
+    assert manifest.delta is not None
+    assert manifest.delta.rows == 1
+    assert manifest.delta.recognition.total == 0
+    assert manifest.delta.metadata.to_dict() == {
+        "added": 0,
+        "updated": 1,
+        "deleted": 0,
+    }
+    assert set(manifest.delta.assets) == {"metadata"}
+    assert manifest.delta.assets["metadata"].rows == 1
     assert load_catalog_version_manifest(path) == manifest
 
 
