@@ -30,6 +30,7 @@ ScryfallImageCache = _UPDATER["ScryfallImageCache"]
 create_embedder = _UPDATER["create_embedder"]
 fetch_scryfall_snapshot = _UPDATER["fetch_scryfall_snapshot"]
 load_config = _UPDATER["load_config"]
+scryfall_source_override = _UPDATER["_scryfall_source_override"]
 
 
 @dataclass(frozen=True)
@@ -136,6 +137,7 @@ def build_seed(
     refresh_workers: int,
     build: bool,
     expected_revision: SourceRevision | None = None,
+    source_override: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     configs = [
         config
@@ -145,7 +147,7 @@ def build_seed(
     if len(configs) != 1:
         raise ValidationError("seed requires exactly one enabled Scryfall catalog")
     config = configs[0]
-    snapshot = fetch_scryfall_snapshot(config.source)
+    snapshot = fetch_scryfall_snapshot({**config.source, **(source_override or {})})
     if expected_revision is not None and snapshot.revision != expected_revision:
         raise ValidationError("Scryfall source revision does not match expected revision")
     rows = list(snapshot.rows)
@@ -295,6 +297,13 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=Path("release"))
     parser.add_argument("--version", required=True)
     parser.add_argument("--expected-source-revisions", type=Path)
+    parser.add_argument(
+        "--scryfall-bulk-uri",
+        help="Archived Scryfall .json[.gz] or .jsonl[.gz] file path or URL",
+    )
+    parser.add_argument("--scryfall-bulk-updated-at")
+    parser.add_argument("--scryfall-bulk-identity")
+    parser.add_argument("--scryfall-bulk-format", choices=("json", "jsonl"))
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--refresh-workers", type=int, default=4)
     parser.add_argument(
@@ -313,6 +322,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
+    source_override = scryfall_source_override(args)
     expected_revision = None
     if args.expected_source_revisions is not None:
         payload = json.loads(args.expected_source_revisions.read_text(encoding="utf-8"))
@@ -339,6 +349,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         refresh_workers=args.refresh_workers,
         build=args.build,
         expected_revision=expected_revision,
+        source_override=source_override,
     )
     return 0
 

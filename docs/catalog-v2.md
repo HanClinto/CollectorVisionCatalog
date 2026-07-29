@@ -217,6 +217,40 @@ release becomes a new base checkpoint, keeping bootstrap work bounded to roughly
 one month of weekly updates. Every release still carries a full snapshot, so a
 client can always skip the chain and install any explicit release directly.
 
+### Reconstructing historical Scryfall snapshots
+
+Timestamped `source_revision.uri` values in published manifests can be replayed
+without changing the normal catalog builder. Use a config with only the Scryfall
+catalog enabled, then provide an archived `.json`, `.json.gz`, `.jsonl`, or
+`.jsonl.gz` file or URL:
+
+```bash
+python scripts/update_catalogs.py \
+  --config /path/to/scryfall-only.json \
+  --previous-dir /path/to/empty-directory \
+  --output-dir historical-base \
+  --version catalog-v2-beta.100-2026-07-20 \
+  --allow-full-rebuild \
+  --scryfall-bulk-uri https://data.scryfall.io/default-cards/default-cards-20260720123456.jsonl.gz \
+  --scryfall-bulk-updated-at 2026-07-20T12:34:56Z \
+  --cache-root /path/to/image-cache
+
+python scripts/update_catalogs.py \
+  --config /path/to/scryfall-only.json \
+  --previous-dir historical-base \
+  --output-dir historical-update \
+  --version catalog-v2-beta.101-2026-07-21 \
+  --scryfall-bulk-uri /path/to/default-cards-20260721123456.jsonl.gz \
+  --scryfall-bulk-updated-at 2026-07-21T12:34:56Z \
+  --cache-root /path/to/image-cache
+```
+
+The second build uses the reconstructed first snapshot as its exact base and
+produces normal identifier, embedding, and metadata deltas. `--scryfall-bulk-format`
+can explicitly select `json` or `jsonl` when a filename has no recognizable
+extension. `--scryfall-bulk-identity` can record an archive-specific identifier;
+otherwise the normalized file or download URI is retained as the identity.
+
 ## Seed assembly
 
 Scryfall and TCGplayer seeds are independently built into distinct directories,

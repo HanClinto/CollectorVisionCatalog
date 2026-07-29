@@ -9,14 +9,15 @@ import os
 import re
 import time
 from collections import defaultdict
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, BinaryIO
 from urllib.error import HTTPError, URLError
-from urllib.parse import urlparse
+from urllib.parse import unquote, urlparse
 from urllib.request import Request, urlopen
 from uuid import UUID
 
@@ -49,6 +50,8 @@ from collectorvision_catalog.sources.tcgcsv import normalize_tcgcsv_product
 
 USER_AGENT = "CollectorVisionCatalog/0.1 (+https://github.com/HanClinto/CollectorVisionCatalog)"
 IMAGE_SUFFIXES = {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp"}
+_GZIP_MAGIC = b"\x1f\x8b"
+_MAX_JSON_VALUE_CHARS = 16 * 1024 * 1024
 MILO1_MODEL_ID = (
     "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:"
     "milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df"
@@ -148,6 +151,23 @@ def scryfall_revision_from_entry(entry: Mapping[str, Any]) -> SourceRevision:
 
 def fetch_scryfall_revision(source: Mapping[str, Any]) -> SourceRevision:
     bulk_type = _required_text(source.get("bulk_type"), "scryfall bulk_type")
+    if source.get("bulk_uri") is not None:
+        uri = _normalize_bulk_uri(_required_text(source.get("bulk_uri"), "scryfall bulk_uri"))
+        return SourceRevision(
+            source_type="scryfall",
+            source_name=bulk_type,
+            updated_at=normalize_rfc3339_utc(
+                _required_text(
+                    source.get("bulk_updated_at"),
+                    "scryfall bulk_updated_at",
+                )
+            ),
+            uri=uri,
+            identity=_required_text(
+                source.get("bulk_identity", uri),
+                "scryfall bulk_identity",
+            ),
+        )
     bulk_index = _read_json_url(SCRYFALL_BULK_INDEX_URL)
     entries = bulk_index.get("data", [])
     entry = next(
@@ -170,23 +190,35 @@ def fetch_scryfall_snapshot(source: dict[str, Any]) -> SourceSnapshot[Recognitio
     }
 
     rows: list[RecognitionRow] = []
-    request = Request(revision.uri, headers={"User-Agent": USER_AGENT, "Accept": "*/*"})
-    with urlopen(request, timeout=120) as response:
-        with gzip.GzipFile(fileobj=response) as compressed:
-            for line_number, raw_line in enumerate(compressed, start=1):
-                if not raw_line.strip():
-                    continue
-                try:
-                    card = json.loads(raw_line)
-                except json.JSONDecodeError as error:
-                    raise ValidationError(
-                        f"invalid Scryfall JSONL at line {line_number}: {error}"
-                    ) from error
+    bulk_format = _scryfall_bulk_format(source, revision.uri)
+    with _open_bulk_uri(revision.uri) as raw_stream:
+        buffered_stream = (
+            raw_stream
+            if callable(getattr(raw_stream, "peek", None))
+            else io.BufferedReader(raw_stream)
+        )
+        stream: BinaryIO = (
+            gzip.GzipFile(fileobj=buffered_stream)
+            if buffered_stream.peek(2)[:2] == _GZIP_MAGIC
+            else buffered_stream
+        )
+        try:
+            cards = (
+                _iter_jsonl_objects(stream, "Scryfall JSONL")
+                if bulk_format == "jsonl"
+                else _iter_json_array(stream, "Scryfall JSON")
+            )
+            for card in cards:
                 if source.get("paper_only", False) and "paper" not in card.get("games", []):
                     continue
                 if languages and card.get("lang") not in languages:
                     continue
                 rows.extend(normalize_scryfall_card(card))
+        finally:
+            if stream is not buffered_stream:
+                stream.close()
+            if buffered_stream is not raw_stream:
+                buffered_stream.close()
     if not rows:
         raise ValidationError(
             f"Scryfall bulk type {revision.source_name!r} produced no recognition rows"
@@ -196,6 +228,135 @@ def fetch_scryfall_snapshot(source: dict[str, Any]) -> SourceSnapshot[Recognitio
 
 def fetch_scryfall_rows(source: dict[str, Any]) -> list[RecognitionRow]:
     return list(fetch_scryfall_snapshot(source).rows)
+
+
+def _normalize_bulk_uri(value: str) -> str:
+    parsed = urlparse(value)
+    if parsed.scheme:
+        if parsed.scheme not in {"file", "http", "https"}:
+            raise ValidationError("scryfall bulk_uri must use file, http, or https")
+        return value
+    path = Path(value).expanduser().resolve()
+    if not path.is_file():
+        raise ValidationError(f"Scryfall bulk file does not exist: {path}")
+    return path.as_uri()
+
+
+def _scryfall_bulk_format(source: Mapping[str, Any], uri: str) -> str:
+    configured = source.get("bulk_format")
+    if configured is not None:
+        value = _required_text(configured, "scryfall bulk_format").lower()
+        if value not in {"json", "jsonl"}:
+            raise ValidationError("scryfall bulk_format must be 'json' or 'jsonl'")
+        return value
+    path = urlparse(uri).path.lower()
+    if path.endswith(".gz"):
+        path = path[:-3]
+    if path.endswith((".jsonl", ".ndjson")):
+        return "jsonl"
+    if path.endswith(".json"):
+        return "json"
+    raise ValidationError(
+        "cannot infer Scryfall bulk format; set bulk_format to 'json' or 'jsonl'"
+    )
+
+
+@contextmanager
+def _open_bulk_uri(uri: str) -> Iterator[BinaryIO]:
+    parsed = urlparse(uri)
+    if parsed.scheme == "file":
+        if parsed.netloc not in {"", "localhost"}:
+            raise ValidationError("scryfall file URI must refer to the local machine")
+        with Path(unquote(parsed.path)).open("rb") as stream:
+            yield stream
+        return
+    request = Request(uri, headers={"User-Agent": USER_AGENT, "Accept": "*/*"})
+    with urlopen(request, timeout=120) as response:
+        yield response
+
+
+def _iter_jsonl_objects(stream: BinaryIO, label: str) -> Iterator[dict[str, Any]]:
+    line_number = 0
+    while raw_line := stream.readline(_MAX_JSON_VALUE_CHARS + 1):
+        line_number += 1
+        if len(raw_line) > _MAX_JSON_VALUE_CHARS:
+            raise ValidationError(
+                f"invalid {label}: line {line_number} exceeds the streaming size limit"
+            )
+        if not raw_line.strip():
+            continue
+        try:
+            value = json.loads(raw_line)
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ValidationError(f"invalid {label} at line {line_number}: {error}") from error
+        if not isinstance(value, dict):
+            raise ValidationError(f"{label} line {line_number} must be an object")
+        yield value
+
+
+def _iter_json_array(stream: BinaryIO, label: str) -> Iterator[dict[str, Any]]:
+    text = io.TextIOWrapper(stream, encoding="utf-8")
+    decoder = json.JSONDecoder()
+    buffer = ""
+    position = 0
+    started = False
+    finished = False
+    expect_value = True
+    can_end = True
+    while not finished:
+        chunk = text.read(64 * 1024)
+        at_eof = not chunk
+        buffer = buffer[position:] + chunk
+        position = 0
+        while True:
+            while position < len(buffer) and buffer[position].isspace():
+                position += 1
+            if not started:
+                if position >= len(buffer):
+                    break
+                if buffer[position] != "[":
+                    raise ValidationError(f"{label} must contain a JSON array")
+                started = True
+                position += 1
+                continue
+            if position >= len(buffer):
+                break
+            if not expect_value:
+                if buffer[position] == "]":
+                    finished = True
+                    position += 1
+                    break
+                if buffer[position] != ",":
+                    raise ValidationError(f"invalid {label}: expected ',' or ']'")
+                position += 1
+                expect_value = True
+                can_end = False
+                continue
+            if buffer[position] == "]":
+                if not can_end:
+                    raise ValidationError(f"invalid {label}: trailing comma")
+                finished = True
+                position += 1
+                break
+            try:
+                value, position = decoder.raw_decode(buffer, position)
+            except json.JSONDecodeError as error:
+                if at_eof:
+                    raise ValidationError(f"invalid {label}: {error}") from error
+                if len(buffer) - position > _MAX_JSON_VALUE_CHARS:
+                    raise ValidationError(
+                        f"invalid {label}: one value exceeds the streaming size limit"
+                    ) from error
+                break
+            if not isinstance(value, dict):
+                raise ValidationError(f"{label} entries must be objects")
+            yield value
+            expect_value = False
+            can_end = True
+        if at_eof:
+            break
+    if not started or not finished or buffer[position:].strip():
+        raise ValidationError(f"invalid or incomplete {label}")
 
 
 def fetch_tcgcsv_revision() -> SourceRevision:
@@ -301,6 +462,7 @@ def build_enabled_catalogs(
     source_rows_factory: Callable[[dict[str, Any]], list[RecognitionRow]] | None = None,
     expected_source_revisions: Mapping[str, SourceRevision] | None = None,
     checked_at: str | None = None,
+    scryfall_source_override: Mapping[str, Any] | None = None,
     embedder_factory: Callable[[str, int], Embedder] | None = None,
     image_loader: ImageLoader | None = None,
 ) -> dict[str, Any]:
@@ -352,7 +514,11 @@ def build_enabled_catalogs(
         for config in configs:
             if config.source.get("type") != "scryfall":
                 continue
-            snapshot = fetch_scryfall_snapshot(config.source)
+            source = {
+                **config.source,
+                **(scryfall_source_override or {}),
+            }
+            snapshot = fetch_scryfall_snapshot(source)
             expected = expected_source_revisions.get(config.key)
             if expected is not None and snapshot.revision != expected:
                 raise ValidationError(
@@ -1020,11 +1186,29 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=Path,
         help="Source-status JSON captured before choosing the release version",
     )
+    parser.add_argument(
+        "--scryfall-bulk-uri",
+        help="Archived Scryfall .json[.gz] or .jsonl[.gz] file path or URL",
+    )
+    parser.add_argument(
+        "--scryfall-bulk-updated-at",
+        help="RFC3339 source timestamp required with --scryfall-bulk-uri",
+    )
+    parser.add_argument(
+        "--scryfall-bulk-identity",
+        help="Optional stable identity recorded in source provenance",
+    )
+    parser.add_argument(
+        "--scryfall-bulk-format",
+        choices=("json", "jsonl"),
+        help="Override format inference for an archived Scryfall file",
+    )
     return parser.parse_args(argv)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
+    scryfall_source_override = _scryfall_source_override(args)
     expected_revisions: dict[str, SourceRevision] = {}
     checked_at = None
     if args.expected_source_revisions is not None:
@@ -1055,9 +1239,35 @@ def main(argv: Sequence[str] | None = None) -> int:
         batch_size=args.batch_size,
         expected_source_revisions=expected_revisions,
         checked_at=checked_at,
+        scryfall_source_override=scryfall_source_override,
     )
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0
+
+
+def _scryfall_source_override(args: argparse.Namespace) -> dict[str, str] | None:
+    if args.scryfall_bulk_uri is None:
+        if any(
+            value is not None
+            for value in (
+                args.scryfall_bulk_updated_at,
+                args.scryfall_bulk_identity,
+                args.scryfall_bulk_format,
+            )
+        ):
+            raise ValidationError("Scryfall bulk options require --scryfall-bulk-uri")
+        return None
+    if args.scryfall_bulk_updated_at is None:
+        raise ValidationError("--scryfall-bulk-updated-at is required with --scryfall-bulk-uri")
+    override = {
+        "bulk_uri": args.scryfall_bulk_uri,
+        "bulk_updated_at": args.scryfall_bulk_updated_at,
+    }
+    if args.scryfall_bulk_identity is not None:
+        override["bulk_identity"] = args.scryfall_bulk_identity
+    if args.scryfall_bulk_format is not None:
+        override["bulk_format"] = args.scryfall_bulk_format
+    return override
 
 
 if __name__ == "__main__":

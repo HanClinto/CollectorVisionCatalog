@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import importlib.util
 import json
 import os
@@ -105,6 +106,134 @@ def test_scryfall_revision_is_extracted_from_selected_bulk_entry(monkeypatch) ->
         "uri": "https://data.scryfall.io/default.jsonl.gz",
         "identity": "bulk-id",
     }
+
+
+@pytest.mark.parametrize(
+    ("filename", "payload", "bulk_format"),
+    [
+        ("archived.json", b'[{"id":"old-card"}]', None),
+        ("archived.jsonl.gz", gzip.compress(b'{"id":"old-card"}\n', mtime=0), None),
+        ("archived.data", gzip.compress(b'{"id":"old-card"}\n', mtime=0), "jsonl"),
+    ],
+)
+def test_scryfall_snapshot_accepts_archived_bulk_files(
+    tmp_path: Path,
+    monkeypatch,
+    filename: str,
+    payload: bytes,
+    bulk_format: str | None,
+) -> None:
+    path = tmp_path / filename
+    path.write_bytes(payload)
+    monkeypatch.setattr(updater, "normalize_scryfall_card", lambda card: [make_row()])
+
+    source = {
+        "type": "scryfall",
+        "bulk_type": "default_cards",
+        "bulk_uri": str(path),
+        "bulk_updated_at": "2026-07-20T12:34:56Z",
+        "bulk_identity": "archived-test",
+    }
+    if bulk_format is not None:
+        source["bulk_format"] = bulk_format
+    snapshot = updater.fetch_scryfall_snapshot(source)
+
+    assert snapshot.revision.uri == path.as_uri()
+    assert snapshot.revision.updated_at == "2026-07-20T12:34:56Z"
+    assert snapshot.revision.identity == "archived-test"
+    assert snapshot.rows == (make_row(),)
+
+
+def test_scryfall_bulk_cli_requires_timestamp() -> None:
+    args = SimpleNamespace(
+        scryfall_bulk_uri="archive.json",
+        scryfall_bulk_updated_at=None,
+        scryfall_bulk_identity=None,
+        scryfall_bulk_format=None,
+    )
+
+    with pytest.raises(ValidationError, match="updated-at"):
+        updater._scryfall_source_override(args)
+
+
+def test_scryfall_jsonl_rejects_oversized_values(monkeypatch) -> None:
+    monkeypatch.setattr(updater, "_MAX_JSON_VALUE_CHARS", 16)
+
+    with pytest.raises(ValidationError, match="streaming size limit"):
+        list(updater._iter_jsonl_objects(BytesIO(b'{"value":"too long"}\n'), "test JSONL"))
+
+
+def test_archived_scryfall_files_build_an_exact_delta(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    config_path = tmp_path / "catalogs.json"
+    make_config(config_path)
+    old_file = tmp_path / "old.jsonl"
+    new_file = tmp_path / "new.jsonl"
+    old_file.write_text('{"id":"old","lang":"en"}\n')
+    new_file.write_text('{"id":"old","lang":"en"}\n{"id":"new","lang":"en"}\n')
+
+    def normalize(card: dict) -> list[RecognitionRow]:
+        card_id = CARD_ID if card["id"] == "old" else "ca000000-0000-0000-0000-000000000002"
+        return [
+            replace(
+                make_row(),
+                key=f"scryfall:{card_id}:face:0",
+                identifiers={"scryfall_card": card_id, "scryfall_oracle": ORACLE_ID},
+                image_url=f"memory://{card['id']}",
+                image_fingerprint=f"fingerprint-{card['id']}",
+            )
+        ]
+
+    monkeypatch.setattr(updater, "normalize_scryfall_card", normalize)
+
+    def embedder_factory(model, batch):
+        return lambda images: np.tile(
+            np.array([[1.0, 0.0]], dtype=np.float32),
+            (len(images), 1),
+        )
+
+    def image_loader(url):
+        return Image.new("RGB", (2, 2))
+
+    base_dir = tmp_path / "base"
+    updater.build_enabled_catalogs(
+        config_path=config_path,
+        previous_dir=tmp_path / "empty",
+        output_dir=base_dir,
+        version="catalog-v2-beta.100-2026-07-20",
+        allow_full_rebuild=True,
+        scryfall_source_override={
+            "bulk_uri": str(old_file),
+            "bulk_updated_at": "2026-07-20T00:00:00Z",
+        },
+        embedder_factory=embedder_factory,
+        image_loader=image_loader,
+    )
+
+    update_dir = tmp_path / "update"
+    updater.build_enabled_catalogs(
+        config_path=config_path,
+        previous_dir=base_dir,
+        output_dir=update_dir,
+        version="catalog-v2-beta.101-2026-07-21",
+        scryfall_source_override={
+            "bulk_uri": str(new_file),
+            "bulk_updated_at": "2026-07-21T00:00:00Z",
+        },
+        embedder_factory=embedder_factory,
+        image_loader=image_loader,
+    )
+
+    build = updater.load_catalog_build(
+        update_dir / "milo1--scryfall--mtg.manifest.json",
+        asset_dir=update_dir,
+    )
+    assert build.manifest.previous_version == "catalog-v2-beta.100-2026-07-20"
+    assert build.manifest.delta.operations == 1
+    assert "identifiers_delta" in build.manifest.assets
+    assert "embeddings_delta" in build.manifest.assets
 
 
 def test_tcgcsv_fetch_rejects_revision_change_mid_read(monkeypatch) -> None:
