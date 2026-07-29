@@ -21,8 +21,8 @@ from .index import CatalogIndex, CatalogIndexEntry
 FEED_FILENAME = "catalog-feed-v2.json"
 MAX_DELTA_CHAIN = 4
 PUBLIC_BASE_URL = "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2"
-_BASE_ASSETS = ("recognition_rows", "recognition_matrix", "metadata_rows")
-_DELTA_ASSETS = ("delta_operations", "delta_matrix", "metadata_delta")
+_BASE_ASSETS = ("identifiers", "embeddings", "metadata")
+_DELTA_ASSETS = ("identifiers_delta", "embeddings_delta", "metadata_delta")
 
 
 @dataclass(frozen=True)
@@ -79,9 +79,9 @@ class SnapshotReference:
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> SnapshotReference:
         assets = _parse_assets(payload)
-        missing = {"recognition_rows", "recognition_matrix"}.difference(assets)
+        missing = {"identifiers", "embeddings"}.difference(assets)
         if missing:
-            raise ValidationError(f"feed base is missing recognition assets: {sorted(missing)}")
+            raise ValidationError(f"feed base is missing required assets: {sorted(missing)}")
         return cls(
             version=_require_non_empty_string(payload.get("version"), "feed base version"),
             manifest=FileReference.from_dict(

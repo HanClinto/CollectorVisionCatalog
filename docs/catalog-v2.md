@@ -65,26 +65,26 @@ SHA-256 checksum, and byte size:
   "checked_at": "2026-08-04T10:17:00Z",
   "source_updated_at": "2026-08-04T08:03:12Z",
   "base": {
-    "version": "catalog-v2-beta.4-2026-07-28",
+    "version": "catalog-v2-beta.5-2026-07-28",
     "manifest": {
-      "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--scryfall--mtg.manifest.json",
+      "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--scryfall--mtg.manifest.json",
       "sha256": "...",
       "size": 1791
     },
     "assets": {
-      "recognition_rows": {"url": "https://...jsonl.gz", "sha256": "...", "size": 5710019},
-      "recognition_matrix": {"url": "https://...f16.gz", "sha256": "...", "size": 25887836},
-      "metadata_rows": {"url": "https://...jsonl.gz", "sha256": "...", "size": 5177483}
+      "identifiers": {"url": "https://...identifiers.jsonl.gz", "sha256": "...", "size": 5710019},
+      "embeddings": {"url": "https://...embeddings.f16.gz", "sha256": "...", "size": 25887836},
+      "metadata": {"url": "https://...metadata.jsonl.gz", "sha256": "...", "size": 5177483}
     }
   },
   "deltas": [
     {
-      "from": "catalog-v2-beta.4-2026-07-28",
-      "to": "catalog-v2-beta.5-2026-08-04",
+      "from": "catalog-v2-beta.5-2026-07-28",
+      "to": "catalog-v2-beta.6-2026-08-04",
       "manifest": {"url": "https://...manifest.json", "sha256": "...", "size": 1844},
       "assets": {
-        "delta_operations": {"url": "https://...delta.jsonl.gz", "sha256": "...", "size": 4812},
-        "delta_matrix": {"url": "https://...delta.f16.gz", "sha256": "...", "size": 22418}
+        "identifiers_delta": {"url": "https://...identifiers.delta.jsonl.gz", "sha256": "...", "size": 4812},
+        "embeddings_delta": {"url": "https://...embeddings.delta.f16.gz", "sha256": "...", "size": 22418}
       }
     }
   ]
@@ -140,7 +140,7 @@ and convert values during dot products. Gzip remains a whole-asset download:
 assets are immutable and checksummed, and clients cache and replace a profile
 atomically. Sharding or range access should be added only after measured need.
 
-The FP16 matrix and recognition JSONL are the required client layer. Metadata
+The FP16 embeddings and identifiers are the required client layer. Metadata
 is optional. Builder state is separate and clients must not download it.
 
 ### Catalog coverage

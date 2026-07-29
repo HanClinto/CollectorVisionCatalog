@@ -20,9 +20,9 @@ JSONValue = None | bool | int | float | str | list["JSONValue"] | dict[str, "JSO
 
 _SAFE_SLUG_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
 _REQUIRED_ASSET_NAMES = {
-    "recognition_matrix",
-    "recognition_rows",
-    "metadata_rows",
+    "embeddings",
+    "identifiers",
+    "metadata",
     "state_rows",
 }
 
@@ -434,10 +434,10 @@ class CatalogManifest:
         missing_assets = _REQUIRED_ASSET_NAMES.difference(assets)
         if missing_assets:
             raise ValidationError(f"manifest is missing required assets: {sorted(missing_assets)}")
-        if delta.operations and "delta_operations" not in assets:
-            raise ValidationError("manifest with recognition delta operations needs an asset")
-        if "delta_matrix" in assets and "delta_operations" not in assets:
-            raise ValidationError("delta matrix requires recognition delta operations")
+        if delta.operations and "identifiers_delta" not in assets:
+            raise ValidationError("manifest with identifier delta operations needs an asset")
+        if "embeddings_delta" in assets and "identifiers_delta" not in assets:
+            raise ValidationError("embedding delta requires identifier delta operations")
         if delta.metadata_operations and "metadata_delta" not in assets:
             raise ValidationError("manifest with metadata delta operations needs an asset")
         return cls(
@@ -641,13 +641,13 @@ def load_catalog_build(
 ) -> CatalogBuild:
     manifest = load_manifest(manifest_path)
     asset_root = Path(asset_dir) if asset_dir is not None else Path(manifest_path).resolve().parent
-    minimal_rows = _load_jsonl_asset(manifest, asset_root, "recognition_rows")
-    metadata_rows = _load_jsonl_asset(manifest, asset_root, "metadata_rows")
+    minimal_rows = _load_jsonl_asset(manifest, asset_root, "identifiers")
+    metadata_rows = _load_jsonl_asset(manifest, asset_root, "metadata")
     state_rows = _load_jsonl_asset(manifest, asset_root, "state_rows")
     embeddings = _load_embedding_asset(
         manifest,
         asset_root,
-        asset_name="recognition_matrix",
+        asset_name="embeddings",
         expected_rows=manifest.rows,
     )
     state_by_key = _load_state_map(state_rows)
@@ -674,10 +674,10 @@ def load_catalog_build(
             f"manifest rows={manifest.rows} does not match recognition row count {len(rows)}"
         )
     if set(state_by_key) != seen_keys:
-        raise ValidationError("state rows must match recognition rows exactly")
+        raise ValidationError("state rows must match identifiers exactly")
     if not set(metadata_by_key).issubset(seen_keys):
         unknown_keys = sorted(set(metadata_by_key).difference(seen_keys))
-        raise ValidationError(f"metadata rows contain unknown keys: {unknown_keys}")
+        raise ValidationError(f"metadata contains unknown keys: {unknown_keys}")
     if embeddings.shape != (manifest.rows, manifest.dim):
         raise ValidationError(
             "embedding matrix shape "
@@ -698,7 +698,7 @@ def load_delta_bundle(
     manifest = load_manifest(manifest_path)
     asset_root = Path(asset_dir) if asset_dir is not None else Path(manifest_path).resolve().parent
     operation_payloads = (
-        _load_jsonl_asset(manifest, asset_root, "delta_operations")
+        _load_jsonl_asset(manifest, asset_root, "identifiers_delta")
         if manifest.delta.operations
         else []
     )
@@ -732,7 +732,7 @@ def load_delta_bundle(
         _load_embedding_asset(
             manifest,
             asset_root,
-            asset_name="delta_matrix",
+            asset_name="embeddings_delta",
             expected_rows=upsert_count,
         )
         if upsert_count
@@ -1140,17 +1140,17 @@ def _build_asset_payloads(
     metadata_operations: Sequence[dict[str, Any]],
 ) -> dict[str, tuple[str, str, bytes]]:
     assets = {
-        "recognition_matrix": (
-            f"{catalog_slug}.recognition.f16.gz",
+        "embeddings": (
+            f"{catalog_slug}.embeddings.f16.gz",
             "application/octet-stream",
             _gzip_bytes(_embedding_bytes(embeddings)),
         ),
-        "recognition_rows": (
-            f"{catalog_slug}.recognition.jsonl.gz",
+        "identifiers": (
+            f"{catalog_slug}.identifiers.jsonl.gz",
             "application/x-ndjson",
             _gzip_bytes(_jsonl_bytes(row.minimal_record() for row in rows)),
         ),
-        "metadata_rows": (
+        "metadata": (
             f"{catalog_slug}.metadata.jsonl.gz",
             "application/x-ndjson",
             _gzip_bytes(_jsonl_bytes(_iter_metadata_records(rows))),
@@ -1162,14 +1162,14 @@ def _build_asset_payloads(
         ),
     }
     if delta_operations:
-        assets["delta_operations"] = (
-            f"{catalog_slug}.delta.jsonl.gz",
+        assets["identifiers_delta"] = (
+            f"{catalog_slug}.identifiers.delta.jsonl.gz",
             "application/x-ndjson",
             _gzip_bytes(_jsonl_bytes(delta_operations)),
         )
     if len(delta_embeddings):
-        assets["delta_matrix"] = (
-            f"{catalog_slug}.delta.f16.gz",
+        assets["embeddings_delta"] = (
+            f"{catalog_slug}.embeddings.delta.f16.gz",
             "application/octet-stream",
             _gzip_bytes(_embedding_bytes(delta_embeddings)),
         )

@@ -3,28 +3,28 @@
     "milo1/scryfall/mtg": {
       "base": {
         "assets": {
-          "metadata_rows": {
-            "sha256": "20ad2d6254fea07d0f05f2c53ef922d86c30cb6960eab98644e57fdba129196c",
-            "size": 5177483,
-            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--scryfall--mtg.metadata.jsonl.gz"
-          },
-          "recognition_matrix": {
+          "embeddings": {
             "sha256": "2ef78b77311161db6af4bb4c544593dcb3929ee999a950a7cc90c3d99a57e3ad",
             "size": 25887836,
-            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--scryfall--mtg.recognition.f16.gz"
+            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--scryfall--mtg.embeddings.f16.gz"
           },
-          "recognition_rows": {
+          "identifiers": {
             "sha256": "7a826f571c1fb974ec9a1ef414d0c3523b9a9df7d227589626db841bbc457d16",
             "size": 5710019,
-            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--scryfall--mtg.recognition.jsonl.gz"
+            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--scryfall--mtg.identifiers.jsonl.gz"
+          },
+          "metadata": {
+            "sha256": "20ad2d6254fea07d0f05f2c53ef922d86c30cb6960eab98644e57fdba129196c",
+            "size": 5177483,
+            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--scryfall--mtg.metadata.jsonl.gz"
           }
         },
         "manifest": {
-          "sha256": "fc1cf308290c05201b29214bd80a4f933034bccf610d268651ba91b0b6adf2e3",
-          "size": 1791,
-          "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--scryfall--mtg.manifest.json"
+          "sha256": "d60a9c4d72409320a9d33e43a1e58ff94a0b45ad609d38f6eec7e8074305fc71",
+          "size": 1772,
+          "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--scryfall--mtg.manifest.json"
         },
-        "version": "catalog-v2-beta.4-2026-07-28"
+        "version": "catalog-v2-beta.5-2026-07-28"
       },
       "deltas": [],
       "source_updated_at": "2026-07-28T23:57:10.831Z"
@@ -32,28 +32,28 @@
     "milo1/tcgplayer/digimon-card-game": {
       "base": {
         "assets": {
-          "metadata_rows": {
-            "sha256": "2fc0c5b407c4347c70cc87e726ddc2bf7a4df20b5d9e26915abe19a40ca43ae1",
-            "size": 156048,
-            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--digimon-card-game.metadata.jsonl.gz"
-          },
-          "recognition_matrix": {
+          "embeddings": {
             "sha256": "bb3e237493e651929f13f241b5b74192f3b30f53c7b7c8b7d6bb768cb95044a4",
             "size": 2022116,
-            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--digimon-card-game.recognition.f16.gz"
+            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--digimon-card-game.embeddings.f16.gz"
           },
-          "recognition_rows": {
+          "identifiers": {
             "sha256": "65f6846cedcb0f1ac469e8aacbdfea9398c9d98999d621eb6030e8e43e05949d",
             "size": 49489,
-            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--digimon-card-game.recognition.jsonl.gz"
+            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--digimon-card-game.identifiers.jsonl.gz"
+          },
+          "metadata": {
+            "sha256": "2fc0c5b407c4347c70cc87e726ddc2bf7a4df20b5d9e26915abe19a40ca43ae1",
+            "size": 156048,
+            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--digimon-card-game.metadata.jsonl.gz"
           }
         },
         "manifest": {
-          "sha256": "ca3c3b1adddddeb7b5e45e11b32a5cc3e0aaeab2f2470d6914e4e808edfe8e42",
-          "size": 1829,
-          "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--digimon-card-game.manifest.json"
+          "sha256": "ee84ebced1eb565998d600e4c113f7fcca0ca7a22be161c2a7e1394c5f900e7a",
+          "size": 1759,
+          "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--digimon-card-game.manifest.json"
         },
-        "version": "catalog-v2-beta.4-2026-07-28"
+        "version": "catalog-v2-beta.5-2026-07-28"
       },
       "deltas": [],
       "source_updated_at": "2026-07-28T20:12:27Z"
@@ -61,28 +61,28 @@
     "milo1/tcgplayer/flesh-and-blood": {
       "base": {
         "assets": {
-          "metadata_rows": {
-            "sha256": "e590f75c7de6806de3b65e1ee39b1cbe37dcb06cd2b0ab5b01c0332da5081edd",
-            "size": 198100,
-            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--flesh-and-blood.metadata.jsonl.gz"
-          },
-          "recognition_matrix": {
+          "embeddings": {
             "sha256": "f3f95464b8232edda520a978701ceb73229e1d7a71e53f95c9c035d22e72a12b",
             "size": 2352944,
-            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--flesh-and-blood.recognition.f16.gz"
+            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--flesh-and-blood.embeddings.f16.gz"
           },
-          "recognition_rows": {
+          "identifiers": {
             "sha256": "d13f2bdd94a2677beed85e55bb9637abd5bbe93eef00cd80d757242dfa4421ed",
             "size": 59172,
-            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--flesh-and-blood.recognition.jsonl.gz"
+            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--flesh-and-blood.identifiers.jsonl.gz"
+          },
+          "metadata": {
+            "sha256": "e590f75c7de6806de3b65e1ee39b1cbe37dcb06cd2b0ab5b01c0332da5081edd",
+            "size": 198100,
+            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--flesh-and-blood.metadata.jsonl.gz"
           }
         },
         "manifest": {
-          "sha256": "3c7c387530bde769ca3516ae9f1cb004cc0bb13d74eb2d3b8ad0834e08268851",
-          "size": 2526,
-          "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--flesh-and-blood.manifest.json"
+          "sha256": "776630b21cbaa42c52882f3276ae9147bcb2fd21dd1b7fa1d058f9f18aabe818",
+          "size": 1748,
+          "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--flesh-and-blood.manifest.json"
         },
-        "version": "catalog-v2-beta.4-2026-07-28"
+        "version": "catalog-v2-beta.5-2026-07-28"
       },
       "deltas": [],
       "source_updated_at": "2026-07-28T20:12:27Z"
@@ -90,28 +90,28 @@
     "milo1/tcgplayer/lorcana": {
       "base": {
         "assets": {
-          "metadata_rows": {
-            "sha256": "439106e4d2e048c49e46584ef80a00edd9f582f2815c4a4a50bbfa6e179c23f7",
-            "size": 84667,
-            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--lorcana.metadata.jsonl.gz"
-          },
-          "recognition_matrix": {
+          "embeddings": {
             "sha256": "ad8d03dbc7c6933b64eaf39a70c557a01bbea13a9cee50e97bb671a9c72dd0a6",
             "size": 806325,
-            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--lorcana.recognition.f16.gz"
+            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--lorcana.embeddings.f16.gz"
           },
-          "recognition_rows": {
+          "identifiers": {
             "sha256": "ba19636a353d8111b626a7afd6e6653769ad5269d8585776bdc22e4d0a4e5b57",
             "size": 19440,
-            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--lorcana.recognition.jsonl.gz"
+            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--lorcana.identifiers.jsonl.gz"
+          },
+          "metadata": {
+            "sha256": "439106e4d2e048c49e46584ef80a00edd9f582f2815c4a4a50bbfa6e179c23f7",
+            "size": 84667,
+            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--lorcana.metadata.jsonl.gz"
           }
         },
         "manifest": {
-          "sha256": "1d4ebb881ab2ae48974d772a97aa2a671d55deca913476b7961b90ccaa59c255",
-          "size": 2459,
-          "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--lorcana.manifest.json"
+          "sha256": "59abc46c2c227ac8e3d7dc2cdefa89795cadd6bc8e4cc494f87a32c67df7e75a",
+          "size": 1697,
+          "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--lorcana.manifest.json"
         },
-        "version": "catalog-v2-beta.4-2026-07-28"
+        "version": "catalog-v2-beta.5-2026-07-28"
       },
       "deltas": [],
       "source_updated_at": "2026-07-28T20:12:27Z"
@@ -119,28 +119,28 @@
     "milo1/tcgplayer/magic-the-gathering": {
       "base": {
         "assets": {
-          "metadata_rows": {
-            "sha256": "642c9a20bbb36e41d9b5ce3fd1468445d1faaea615f8dc764e4a9407797436fb",
-            "size": 2678737,
-            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--magic-the-gathering.metadata.jsonl.gz"
-          },
-          "recognition_matrix": {
+          "embeddings": {
             "sha256": "07cc72e0102d73b5dd42b553f7e99b8102cc23979436a3e630d0de1d70a28734",
             "size": 25780525,
-            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--magic-the-gathering.recognition.f16.gz"
+            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--magic-the-gathering.embeddings.f16.gz"
           },
-          "recognition_rows": {
+          "identifiers": {
             "sha256": "4b2078265da268060067740638f5453ef4bc8b5a7496ce1fd2634ec74359bbfc",
             "size": 665130,
-            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--magic-the-gathering.recognition.jsonl.gz"
+            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--magic-the-gathering.identifiers.jsonl.gz"
+          },
+          "metadata": {
+            "sha256": "642c9a20bbb36e41d9b5ce3fd1468445d1faaea615f8dc764e4a9407797436fb",
+            "size": 2678737,
+            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--magic-the-gathering.metadata.jsonl.gz"
           }
         },
         "manifest": {
-          "sha256": "965ef0bde702ec7ab55ef42e3a23125243535fc1e4da03d74acc7cdc060fa1a5",
-          "size": 2575,
-          "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--magic-the-gathering.manifest.json"
+          "sha256": "c0ae0b874976cd14a34f30b74655c01f7f77d0d5a91ec433516b7f7fbe8527b6",
+          "size": 1777,
+          "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--magic-the-gathering.manifest.json"
         },
-        "version": "catalog-v2-beta.4-2026-07-28"
+        "version": "catalog-v2-beta.5-2026-07-28"
       },
       "deltas": [],
       "source_updated_at": "2026-07-28T20:12:27Z"
@@ -148,28 +148,28 @@
     "milo1/tcgplayer/one-piece": {
       "base": {
         "assets": {
-          "metadata_rows": {
-            "sha256": "07f346b6317fad0dec1a2e50ba6d99aebcf198f245a9291d89d2e864b2384e32",
-            "size": 117872,
-            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--one-piece.metadata.jsonl.gz"
-          },
-          "recognition_matrix": {
+          "embeddings": {
             "sha256": "1295ca738c729a5f46cc238ceb7c2c2f540c28ca4a59b0b72a738bc5b653522e",
             "size": 1546882,
-            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--one-piece.recognition.f16.gz"
+            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--one-piece.embeddings.f16.gz"
           },
-          "recognition_rows": {
+          "identifiers": {
             "sha256": "d9c54e011fb25d94ba3abb1f558902176858acfa372c3e407f73f4af57e645c6",
             "size": 36383,
-            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--one-piece.recognition.jsonl.gz"
+            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--one-piece.identifiers.jsonl.gz"
+          },
+          "metadata": {
+            "sha256": "07f346b6317fad0dec1a2e50ba6d99aebcf198f245a9291d89d2e864b2384e32",
+            "size": 117872,
+            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--one-piece.metadata.jsonl.gz"
           }
         },
         "manifest": {
-          "sha256": "0b7e8473c2aa8237d70595b2ecf1220b5d4d81ed5975677b665307d033b3d95d",
-          "size": 2474,
-          "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--one-piece.manifest.json"
+          "sha256": "ad94af85b604141a7331800e3ee0e7720e67449fbc472bf76183b59eda9d2c5f",
+          "size": 1711,
+          "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--one-piece.manifest.json"
         },
-        "version": "catalog-v2-beta.4-2026-07-28"
+        "version": "catalog-v2-beta.5-2026-07-28"
       },
       "deltas": [],
       "source_updated_at": "2026-07-28T20:12:27Z"
@@ -177,28 +177,28 @@
     "milo1/tcgplayer/pokemon": {
       "base": {
         "assets": {
-          "metadata_rows": {
-            "sha256": "514efcfaf87720f6f9349ac87f0e7c68c60990cf482a9081f85bf56aa2f6022b",
-            "size": 622497,
-            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--pokemon.metadata.jsonl.gz"
-          },
-          "recognition_matrix": {
+          "embeddings": {
             "sha256": "6986a731c822c65cc174f8c7ad6a9ff26886ed0e919a08ee72811ea8cc124fd7",
             "size": 6330698,
-            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--pokemon.recognition.f16.gz"
+            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--pokemon.embeddings.f16.gz"
           },
-          "recognition_rows": {
+          "identifiers": {
             "sha256": "5f1876f683209ef9b3a10ed2ca8dae2255c6e0516dd6447c8cad5f6be8c82a4b",
             "size": 168350,
-            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--pokemon.recognition.jsonl.gz"
+            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--pokemon.identifiers.jsonl.gz"
+          },
+          "metadata": {
+            "sha256": "514efcfaf87720f6f9349ac87f0e7c68c60990cf482a9081f85bf56aa2f6022b",
+            "size": 622497,
+            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--pokemon.metadata.jsonl.gz"
           }
         },
         "manifest": {
-          "sha256": "207c6be5559dafb7dcb4b2440f46156b11c77c9d22b6d90f6d6d60d290ddccb0",
-          "size": 2455,
-          "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--pokemon.manifest.json"
+          "sha256": "260f89d97989ba788329ad0c4f90827ca681e1dfffb9ea285b45ef3e1d0b4d18",
+          "size": 1702,
+          "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--pokemon.manifest.json"
         },
-        "version": "catalog-v2-beta.4-2026-07-28"
+        "version": "catalog-v2-beta.5-2026-07-28"
       },
       "deltas": [],
       "source_updated_at": "2026-07-28T20:12:27Z"
@@ -206,28 +206,28 @@
     "milo1/tcgplayer/star-wars-unlimited": {
       "base": {
         "assets": {
-          "metadata_rows": {
-            "sha256": "f27fa27aa17a37a4d08e7c1f7ae97129c2bfe7e75f773c15ee6a6afebedb7ce5",
-            "size": 178216,
-            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--star-wars-unlimited.metadata.jsonl.gz"
-          },
-          "recognition_matrix": {
+          "embeddings": {
             "sha256": "22da86b46fd49597db4001e5c0df9d0c03aa8d667a94c7b957ba5451a2d6586d",
             "size": 1954316,
-            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--star-wars-unlimited.recognition.f16.gz"
+            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--star-wars-unlimited.embeddings.f16.gz"
           },
-          "recognition_rows": {
+          "identifiers": {
             "sha256": "f8ea12b184628547fea50f6423d3fc6ae13c80af27cf2b7eaaeb849e62fba862",
             "size": 50054,
-            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--star-wars-unlimited.recognition.jsonl.gz"
+            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--star-wars-unlimited.identifiers.jsonl.gz"
+          },
+          "metadata": {
+            "sha256": "f27fa27aa17a37a4d08e7c1f7ae97129c2bfe7e75f773c15ee6a6afebedb7ce5",
+            "size": 178216,
+            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--star-wars-unlimited.metadata.jsonl.gz"
           }
         },
         "manifest": {
-          "sha256": "ee73c7519d9fcb7944d1eddad267570bd31ef91cdc41be3d02aa31558f30ff6e",
-          "size": 2560,
-          "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--star-wars-unlimited.manifest.json"
+          "sha256": "920d3d520a0375dc49cc88a7eba84e08e2dcec6e3d24a870b75a41b04161ae24",
+          "size": 1771,
+          "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--star-wars-unlimited.manifest.json"
         },
-        "version": "catalog-v2-beta.4-2026-07-28"
+        "version": "catalog-v2-beta.5-2026-07-28"
       },
       "deltas": [],
       "source_updated_at": "2026-07-28T20:12:27Z"
@@ -235,35 +235,35 @@
     "milo1/tcgplayer/yugioh": {
       "base": {
         "assets": {
-          "metadata_rows": {
-            "sha256": "8f415c6b3b240c72b881bccc2a3ed765de923558ef8b2ffa0bf83fbdcd0a3637",
-            "size": 1031497,
-            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--yugioh.metadata.jsonl.gz"
-          },
-          "recognition_matrix": {
+          "embeddings": {
             "sha256": "c6b439082a76d8e282c0b82112c4337f1bebf7b2165d77bd7ee3cda587d7b2d4",
             "size": 10415536,
-            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--yugioh.recognition.f16.gz"
+            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--yugioh.embeddings.f16.gz"
           },
-          "recognition_rows": {
+          "identifiers": {
             "sha256": "a7cd3e84d92e7fad2a0584499f7f2837ca8d7680fe33a8b1c388f046e2196a4b",
             "size": 248773,
-            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--yugioh.recognition.jsonl.gz"
+            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--yugioh.identifiers.jsonl.gz"
+          },
+          "metadata": {
+            "sha256": "8f415c6b3b240c72b881bccc2a3ed765de923558ef8b2ffa0bf83fbdcd0a3637",
+            "size": 1031497,
+            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--yugioh.metadata.jsonl.gz"
           }
         },
         "manifest": {
-          "sha256": "04da3d43000d08f4721b968f58b2abc3832cddf2f6d4c7421f79e321f6ba1d44",
-          "size": 2448,
-          "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--tcgplayer--yugioh.manifest.json"
+          "sha256": "1158a1e26a6bc53a405220556cd4d550319a8ee1032e317979d399e2f03d4719",
+          "size": 1698,
+          "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--tcgplayer--yugioh.manifest.json"
         },
-        "version": "catalog-v2-beta.4-2026-07-28"
+        "version": "catalog-v2-beta.5-2026-07-28"
       },
       "deltas": [],
       "source_updated_at": "2026-07-28T20:12:27Z"
     }
   },
-  "checked_at": "2026-07-29T02:08:27Z",
-  "release_version": "catalog-v2-beta.4-2026-07-28",
+  "checked_at": "2026-07-29T03:06:59Z",
+  "release_version": "catalog-v2-beta.5-2026-07-28",
   "schema_version": 2,
   "source_updated_at": "2026-07-28T23:57:10.831Z"
 }

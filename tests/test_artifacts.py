@@ -166,7 +166,7 @@ def test_build_outputs_are_deterministic_and_loadable(workspace: Path) -> None:
     loaded = load_catalog_build(manifest_path)
     delta = load_delta_bundle(manifest_path)
     recognition_records = _read_gzip_jsonl(
-        workspace / "build-a" / build_a.manifest.assets["recognition_rows"].filename
+        workspace / "build-a" / build_a.manifest.assets["identifiers"].filename
     )
 
     assert build_a.manifest.to_dict() == build_b.manifest.to_dict()
@@ -182,8 +182,8 @@ def test_build_outputs_are_deterministic_and_loadable(workspace: Path) -> None:
     )
     assert len(delta.operations) == 0
     assert delta.embeddings.shape == (0, 4)
-    assert "delta_operations" not in build_a.manifest.assets
-    assert "delta_matrix" not in build_a.manifest.assets
+    assert "identifiers_delta" not in build_a.manifest.assets
+    assert "embeddings_delta" not in build_a.manifest.assets
     assert "metadata_delta" not in build_a.manifest.assets
     assert loaded.rows[0].metadata == {"name": "Alpha"}
     assert all(
@@ -289,11 +289,11 @@ def test_legacy_empty_delta_assets_remain_readable(workspace: Path) -> None:
         embedding_model=EMBEDDING_MODEL,
     )
     payload = build.manifest.to_dict()
-    placeholder = payload["assets"]["recognition_rows"]
+    placeholder = payload["assets"]["identifiers"]
     payload["assets"].update(
         {
-            "delta_operations": placeholder,
-            "delta_matrix": placeholder,
+            "identifiers_delta": placeholder,
+            "embeddings_delta": placeholder,
             "metadata_delta": placeholder,
         }
     )
@@ -360,10 +360,10 @@ def test_loader_enforces_manifest_result_identifier(workspace: Path) -> None:
         {"memory://alpha": (255, 0, 0)},
     )
     manifest_path = build_dir / manifest_filename_for_catalog(CATALOG_KEY)
-    recognition_path = build_dir / "milo1--scryfall--mtg.recognition.jsonl.gz"
+    recognition_path = build_dir / "milo1--scryfall--mtg.identifiers.jsonl.gz"
     recognition_records = _read_gzip_jsonl(recognition_path)
     recognition_records[0]["identifiers"] = {"other": "alpha"}
-    _replace_gzip_jsonl_asset(manifest_path, "recognition_rows", recognition_records)
+    _replace_gzip_jsonl_asset(manifest_path, "identifiers", recognition_records)
 
     with pytest.raises(ValidationError, match="missing result identifier 'test'"):
         load_catalog_build(manifest_path)
@@ -489,7 +489,7 @@ def test_state_only_change_reuses_embedding_and_roundtrips_delta(workspace: Path
     reconstructed = apply_delta(previous, manifest_path)
     loaded = load_catalog_build(manifest_path)
     delta_records = _read_gzip_jsonl(
-        workspace / "state-change" / loaded.manifest.assets["delta_operations"].filename
+        workspace / "state-change" / loaded.manifest.assets["identifiers_delta"].filename
     )
 
     assert embedder.calls == []
@@ -619,19 +619,19 @@ def test_loader_rejects_corruption_and_truncation(workspace: Path) -> None:
     _, build_dir, _, _ = _build_initial_catalog(workspace, rows, image_map)
     manifest_path = build_dir / manifest_filename_for_catalog(CATALOG_KEY)
 
-    recognition_rows_path = build_dir / "milo1--scryfall--mtg.recognition.jsonl.gz"
+    recognition_rows_path = build_dir / "milo1--scryfall--mtg.identifiers.jsonl.gz"
     recognition_rows_path.write_bytes(recognition_rows_path.read_bytes() + b"corrupt")
     with pytest.raises(AssetIntegrityError):
         load_catalog_build(manifest_path)
 
     _, build_dir, _, _ = _build_initial_catalog(workspace / "truncate", rows, image_map)
     manifest_path = build_dir / manifest_filename_for_catalog(CATALOG_KEY)
-    truncated_asset_path = build_dir / "milo1--scryfall--mtg.recognition.f16.gz"
+    truncated_asset_path = build_dir / "milo1--scryfall--mtg.embeddings.f16.gz"
     truncated_bytes = truncated_asset_path.read_bytes()[:-3]
     truncated_asset_path.write_bytes(truncated_bytes)
     manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest_payload["assets"]["recognition_matrix"]["size"] = len(truncated_bytes)
-    manifest_payload["assets"]["recognition_matrix"]["sha256"] = sha256(truncated_bytes).hexdigest()
+    manifest_payload["assets"]["embeddings"]["size"] = len(truncated_bytes)
+    manifest_payload["assets"]["embeddings"]["sha256"] = sha256(truncated_bytes).hexdigest()
     manifest_path.write_text(json.dumps(manifest_payload), encoding="utf-8")
     with pytest.raises(AssetIntegrityError):
         load_catalog_build(manifest_path)

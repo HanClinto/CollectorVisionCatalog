@@ -174,9 +174,9 @@ def validate_release(
                 raise ValidationError(f"catalog feed reference does not match index for {key!r}")
             manifest = manifests[key][1]
             allowed_names = (
-                ("recognition_rows", "recognition_matrix", "metadata_rows")
+                ("identifiers", "embeddings", "metadata")
                 if not entry.deltas
-                else ("delta_operations", "delta_matrix", "metadata_delta")
+                else ("identifiers_delta", "embeddings_delta", "metadata_delta")
             )
             expected_assets = {
                 name: manifest.assets[name] for name in allowed_names if name in manifest.assets

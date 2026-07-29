@@ -127,7 +127,7 @@ def test_assembly_rejects_filename_collision_and_nested_asset(workspace: Path) -
 
     manifest = _seed(workspace / "nested", "demo/nested")
     payload = json.loads(manifest.read_text())
-    payload["assets"]["recognition_rows"]["filename"] = "../rows.jsonl.gz"
+    payload["assets"]["identifiers"]["filename"] = "../rows.jsonl.gz"
     manifest.write_text(json.dumps(payload), encoding="utf-8")
     index_payload = json.loads((manifest.parent / "catalog-index-v2.json").read_text())
     entry = index_payload["catalogs"]["demo/nested"]
@@ -149,7 +149,7 @@ def test_assembly_rejects_tampered_manifest_asset_and_non_seed(workspace: Path) 
     asset_seed = workspace / "asset-tampered"
     asset_manifest = _seed(asset_seed, "demo/asset")
     asset_payload = json.loads(asset_manifest.read_text())
-    asset_path = asset_seed / asset_payload["assets"]["recognition_rows"]["filename"]
+    asset_path = asset_seed / asset_payload["assets"]["identifiers"]["filename"]
     asset_path.write_bytes(asset_path.read_bytes() + b"tampered")
     with pytest.raises(AssetIntegrityError, match="checksum|size"):
         assemble_seed_release([asset_seed], workspace / "bad-asset", VERSION)
