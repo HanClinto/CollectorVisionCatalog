@@ -29,12 +29,18 @@ from collectorvision_catalog import (
     ValidationError,
     build_catalog,
     load_catalog_build,
+    load_catalog_feed,
+    load_catalog_index,
+    load_manifest,
     manifest_filename_for_catalog,
     normalize_rfc3339_utc,
+    update_catalog_feed,
     validate_artifacts,
+    write_catalog_feed,
     write_catalog_index,
 )
 from collectorvision_catalog.artifacts import Embedder, ImageLoader, default_image_loader
+from collectorvision_catalog.feed import FEED_FILENAME
 from collectorvision_catalog.quality import apply_quality_rules, load_quality_rules
 from collectorvision_catalog.sources.scryfall import normalize_scryfall_card
 from collectorvision_catalog.sources.snapshots import SourceSnapshot
@@ -558,6 +564,25 @@ def build_enabled_catalogs(
 
     index_path = output_dir / "catalog-index-v2.json"
     index = write_catalog_index(index_path, version, manifests)
+    previous_index_path = previous_dir / "catalog-index-v2.json"
+    previous_feed_path = previous_dir / FEED_FILENAME
+    feed = update_catalog_feed(
+        current_index=index,
+        current_manifests={
+            key: load_manifest(path) for key, path in manifests.items()
+        },
+        previous_index=(
+            load_catalog_index(previous_index_path)
+            if previous_index_path.is_file()
+            else None
+        ),
+        previous_feed=(
+            load_catalog_feed(previous_feed_path)
+            if previous_feed_path.is_file()
+            else None
+        ),
+    )
+    write_catalog_feed(output_dir / FEED_FILENAME, feed)
     summary = {
         "version": version,
         "source_updated_at": index.source_updated_at,

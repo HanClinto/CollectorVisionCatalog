@@ -112,9 +112,10 @@ gh release create "$VERSION" --prerelease --latest=false release/*
 
 The assembler validates every manifest and asset before atomically exposing
 `release/`. The flat release contains one combined index, each catalog manifest,
-full recognition snapshots, optional full metadata, updater state, and merged
-quality and seed reports. Zero-operation deltas have no assets. The index
-verifies each manifest, and each manifest verifies its assets.
+full recognition snapshots, optional full metadata, updater state, a bounded
+base-plus-delta discovery feed, and merged quality and seed reports.
+Zero-operation deltas have no assets. The index verifies each manifest, and
+each manifest verifies its assets.
 It also rejects a beta tag whose date differs from the index's maximum upstream
 UTC update date. Expected revisions make a source change between status and
 fetch abort instead of publishing a misleading tag.

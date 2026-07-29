@@ -42,6 +42,32 @@ The date suffix is the UTC date of the index's maximum `source_updated_at`, not
 the build date. The index contains that maximum timestamp once; individual
 source provenance remains in each manifest for builders and audits.
 
+Each release also contains `catalog-feed-v2.json`. The latest copy is mirrored
+to Pages as the moving discovery document for normal clients. For each catalog,
+the feed names one complete base manifest and an ordered list of exact-base
+delta manifests:
+
+```json
+{
+  "base": {
+    "version": "catalog-v2-beta.4-2026-07-28",
+    "manifest_filename": "milo1--scryfall--mtg.manifest.json",
+    "sha256": "..."
+  },
+  "deltas": [
+    {
+      "from": "catalog-v2-beta.4-2026-07-28",
+      "to": "catalog-v2-beta.5-2026-08-04",
+      "manifest_filename": "milo1--scryfall--mtg.manifest.json",
+      "sha256": "..."
+    }
+  ]
+}
+```
+
+The feed references manifests rather than duplicating their asset lists.
+Manifests remain authoritative for filenames, sizes, and checksums.
+
 Hugging Face remains the Catalog v1 host during migration. Catalog v2 does not
 replace or mutate v1 manifests.
 
@@ -159,10 +185,10 @@ A seed manifest has `base_version: null` and zero recognition and metadata
 operations. It has no delta assets. A seed is installed from its full snapshot;
 `apply_delta(None, seed)` is invalid.
 
-This deliberately avoids permanent delta chains. Weekly users get small
-updates, while stale clients have a simple and reliable recovery path.
-Every weekly release still carries a full snapshot, so new and stale users
-never fetch or assemble a chain of deltas.
+The discovery feed advertises at most four consecutive deltas. The next changed
+release becomes a new base checkpoint, keeping bootstrap work bounded to roughly
+one month of weekly updates. Every release still carries a full snapshot, so a
+client can always skip the chain and install any explicit release directly.
 
 ## Seed assembly
 

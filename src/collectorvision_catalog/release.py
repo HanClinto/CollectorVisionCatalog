@@ -19,13 +19,20 @@ from .artifacts import (
     max_source_updated_at,
     validate_artifacts,
 )
+from .feed import FEED_FILENAME, load_catalog_feed, update_catalog_feed, write_catalog_feed
 from .index import CatalogIndex, CatalogIndexEntry, load_catalog_index
 
 INDEX_FILENAME = "catalog-index-v2.json"
 QUALITY_FILENAME = "quality-report.json"
 SEED_SUMMARY_FILENAME = "seed-summary.json"
 CHECKSUM_FILENAME = "SHA256SUMS"
-_ASSEMBLY_FILENAMES = {INDEX_FILENAME, QUALITY_FILENAME, SEED_SUMMARY_FILENAME, CHECKSUM_FILENAME}
+_ASSEMBLY_FILENAMES = {
+    CHECKSUM_FILENAME,
+    FEED_FILENAME,
+    INDEX_FILENAME,
+    QUALITY_FILENAME,
+    SEED_SUMMARY_FILENAME,
+}
 _BETA_VERSION = re.compile(r"^catalog-v2-beta\.\d+-(\d{4}-\d{2}-\d{2})$")
 
 
@@ -50,6 +57,7 @@ def assemble_seed_release(
     quality_catalogs: dict[str, Any] = {}
     summaries: list[dict[str, Any]] = []
     source_revisions = []
+    combined_manifests: dict[str, CatalogManifest] = {}
     for source in sources:
         index, manifests = _validate_indexed_release(source, expected_version=version)
         _verify_checksums_if_present(source)
@@ -81,6 +89,7 @@ def assemble_seed_release(
             quality_catalogs[catalog_key] = quality_entries[catalog_key]
             manifest_path, manifest = manifests[catalog_key]
             source_revisions.append(manifest.source_revision)
+            combined_manifests[catalog_key] = manifest
             _claim_file(source_files, entry.manifest_filename, manifest_path)
             for asset in manifest.assets.values():
                 _claim_file(source_files, asset.filename, source / asset.filename)
@@ -99,6 +108,13 @@ def assemble_seed_release(
         for filename, source_path in sorted(source_files.items()):
             shutil.copyfile(source_path, temporary / filename)
         (temporary / INDEX_FILENAME).write_bytes(_canonical_json_bytes(combined_index.to_dict()))
+        write_catalog_feed(
+            temporary / FEED_FILENAME,
+            update_catalog_feed(
+                current_index=combined_index,
+                current_manifests=combined_manifests,
+            ),
+        )
         (temporary / QUALITY_FILENAME).write_bytes(
             _canonical_json_bytes({"version": version, "catalogs": quality_catalogs})
         )
@@ -130,7 +146,34 @@ def validate_release(
 ) -> CatalogIndex:
     """Validate a complete flat release and verify SHA256SUMS when it exists."""
     directory = Path(release_dir)
-    index, _ = _validate_indexed_release(directory, expected_version=expected_version)
+    index, manifests = _validate_indexed_release(directory, expected_version=expected_version)
+    feed_path = directory / FEED_FILENAME
+    if feed_path.is_file():
+        feed = load_catalog_feed(feed_path)
+        if feed.release_version != index.release_version:
+            raise ValidationError("catalog feed release_version does not match index")
+        if set(feed.catalogs) != set(index.catalogs):
+            raise ValidationError("catalog feed keys do not match index")
+        for key, entry in feed.catalogs.items():
+            if entry.latest_version != index.release_version:
+                manifest = manifests[key][1]
+                if (
+                    manifest.delta.operations
+                    or manifest.delta.metadata_operations
+                ):
+                    raise ValidationError(
+                        f"catalog feed omits current changes for {key!r}"
+                    )
+                continue
+            reference = entry.base if not entry.deltas else entry.deltas[-1]
+            indexed = index.catalogs[key]
+            if (
+                reference.manifest_filename != indexed.manifest_filename
+                or reference.sha256 != indexed.sha256
+            ):
+                raise ValidationError(
+                    f"catalog feed reference does not match index for {key!r}"
+                )
     _flat_release_files(directory)
     checksum_path = directory / CHECKSUM_FILENAME
     if verify_checksums and checksum_path.exists():

@@ -18,6 +18,16 @@ from .artifacts import (
     normalize_rfc3339_utc,
     validate_artifacts,
 )
+from .feed import (
+    FEED_FILENAME,
+    CatalogFeed,
+    CatalogFeedEntry,
+    DeltaReference,
+    ManifestReference,
+    load_catalog_feed,
+    update_catalog_feed,
+    write_catalog_feed,
+)
 from .index import CatalogIndex, CatalogIndexEntry, load_catalog_index, write_catalog_index
 from .release import assemble_seed_release, validate_release, write_checksums
 from .sources.snapshots import SourceSnapshot
@@ -30,6 +40,11 @@ __all__ = [
     "CatalogIndex",
     "CatalogIndexEntry",
     "CatalogManifest",
+    "CatalogFeed",
+    "CatalogFeedEntry",
+    "DeltaReference",
+    "FEED_FILENAME",
+    "ManifestReference",
     "RecognitionRow",
     "SourceRevision",
     "SourceSnapshot",
@@ -39,6 +54,7 @@ __all__ = [
     "build_catalog",
     "catalog_key_to_slug",
     "load_catalog_build",
+    "load_catalog_feed",
     "load_catalog_index",
     "load_delta_bundle",
     "load_manifest",
@@ -47,6 +63,8 @@ __all__ = [
     "max_source_updated_at",
     "validate_artifacts",
     "validate_release",
+    "update_catalog_feed",
     "write_checksums",
     "write_catalog_index",
+    "write_catalog_feed",
 ]
