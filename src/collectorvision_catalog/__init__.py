@@ -20,6 +20,7 @@ from .artifacts import (
 )
 from .feed import (
     FEED_FILENAME,
+    AssetReference,
     CatalogFeed,
     CatalogFeedEntry,
     DeltaReference,
@@ -46,6 +47,7 @@ from .versioning import (
 
 __all__ = [
     "AssetIntegrityError",
+    "AssetReference",
     "CatalogBuild",
     "CatalogDescriptor",
     "CatalogError",

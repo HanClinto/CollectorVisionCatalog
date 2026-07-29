@@ -15,7 +15,12 @@ from .artifacts import (
     _require_non_empty_string,
     normalize_rfc3339_utc,
 )
-from .publication import BASE_ASSETS, CatalogVersionManifest, PublishedAsset
+from .publication import (
+    BASE_ASSETS,
+    CatalogVersionManifest,
+    ChangeCounts,
+    PublishedAsset,
+)
 from .versioning import validate_public_name
 
 FEED_FILENAME = "catalog-feed-v2.json"
@@ -79,16 +84,49 @@ class FileReference:
         return cls(url=url, sha256=checksum, size=size)
 
 
+@dataclass(frozen=True)
+class AssetReference:
+    url: str
+    sha256: str
+    size: int
+    rows: int
+
+    @property
+    def filename(self) -> str:
+        return PurePosixPath(unquote(urlparse(self.url).path)).name
+
+    def to_dict(self) -> dict[str, str | int]:
+        return {
+            "url": self.url,
+            "sha256": self.sha256,
+            "size": self.size,
+            "rows": self.rows,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> AssetReference:
+        _exact_keys(payload, {"url", "sha256", "size", "rows"}, "feed asset reference")
+        file = FileReference.from_dict(
+            {key: payload[key] for key in ("url", "sha256", "size")}
+        )
+        return cls(
+            url=file.url,
+            sha256=file.sha256,
+            size=file.size,
+            rows=_version(payload.get("rows"), "feed asset rows"),
+        )
+
+
 def _assets_from_dict(
     payload: Mapping[str, Any], *, name: str, allowed: set[str], required: set[str]
-) -> dict[str, FileReference]:
+) -> dict[str, AssetReference]:
     assets_payload = _require_mapping(payload.get("assets"), f"{name} assets")
     if not required.issubset(assets_payload) or not set(assets_payload).issubset(allowed):
         raise ValidationError(
             f"{name} assets must contain {sorted(required)} and only {sorted(allowed)}"
         )
     return {
-        _require_non_empty_string(key, f"{name} asset key"): FileReference.from_dict(
+        _require_non_empty_string(key, f"{name} asset key"): AssetReference.from_dict(
             _require_mapping(value, f"{name} asset {key!r}")
         )
         for key, value in assets_payload.items()
@@ -98,21 +136,24 @@ def _assets_from_dict(
 @dataclass(frozen=True)
 class SnapshotReference:
     version: int
+    rows: int
     manifest: FileReference
-    assets: dict[str, FileReference]
+    assets: dict[str, AssetReference]
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "version": self.version,
+            "rows": self.rows,
             "manifest": self.manifest.to_dict(),
             "assets": {key: value.to_dict() for key, value in sorted(self.assets.items())},
         }
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> SnapshotReference:
-        _exact_keys(payload, {"version", "manifest", "assets"}, "feed base")
-        return cls(
+        _exact_keys(payload, {"version", "rows", "manifest", "assets"}, "feed base")
+        snapshot = cls(
             version=_version(payload.get("version"), "feed base version"),
+            rows=_version(payload.get("rows"), "feed base rows"),
             manifest=FileReference.from_dict(
                 _require_mapping(payload.get("manifest"), "feed base manifest")
             ),
@@ -123,19 +164,32 @@ class SnapshotReference:
                 required=set(BASE_ASSETS),
             ),
         )
+        if (
+            snapshot.assets["embeddings"].rows != snapshot.rows
+            or snapshot.assets["identifiers"].rows != snapshot.rows
+            or snapshot.assets["metadata"].rows > snapshot.rows
+        ):
+            raise ValidationError("feed base asset rows do not match base rows")
+        return snapshot
 
 
 @dataclass(frozen=True)
 class DeltaReference:
     from_version: int
     to_version: int
+    rows: int
+    recognition: ChangeCounts
+    metadata: ChangeCounts
     manifest: FileReference
-    assets: dict[str, FileReference]
+    assets: dict[str, AssetReference]
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "from_version": self.from_version,
             "to_version": self.to_version,
+            "rows": self.rows,
+            "recognition": self.recognition.to_dict(),
+            "metadata": self.metadata.to_dict(),
             "manifest": self.manifest.to_dict(),
             "assets": {key: value.to_dict() for key, value in sorted(self.assets.items())},
         }
@@ -144,7 +198,15 @@ class DeltaReference:
     def from_dict(cls, payload: Mapping[str, Any]) -> DeltaReference:
         _exact_keys(
             payload,
-            {"from_version", "to_version", "manifest", "assets"},
+            {
+                "from_version",
+                "to_version",
+                "rows",
+                "recognition",
+                "metadata",
+                "manifest",
+                "assets",
+            },
             "feed delta",
         )
         assets = _assets_from_dict(
@@ -156,20 +218,32 @@ class DeltaReference:
         to_version = _version(payload.get("to_version"), "feed delta to_version")
         if to_version != from_version + 1:
             raise ValidationError("feed delta must advance exactly one version")
-        return cls(
+        delta = cls(
             from_version=from_version,
             to_version=to_version,
+            rows=_version(payload.get("rows"), "feed delta rows"),
+            recognition=ChangeCounts.from_dict(
+                _require_mapping(payload.get("recognition"), "feed delta recognition"),
+                "feed delta recognition",
+            ),
+            metadata=ChangeCounts.from_dict(
+                _require_mapping(payload.get("metadata"), "feed delta metadata"),
+                "feed delta metadata",
+            ),
             manifest=FileReference.from_dict(
                 _require_mapping(payload.get("manifest"), "feed delta manifest")
             ),
             assets=assets,
         )
+        _validate_delta_rows(delta)
+        return delta
 
 
 @dataclass(frozen=True)
 class CatalogFeedEntry:
     public_name: str
     current_version: int
+    rows: int
     source_updated_at: str
     base: SnapshotReference
     deltas: tuple[DeltaReference, ...]
@@ -178,6 +252,7 @@ class CatalogFeedEntry:
         return {
             "public_name": self.public_name,
             "current_version": self.current_version,
+            "rows": self.rows,
             "source_updated_at": self.source_updated_at,
             "base": self.base.to_dict(),
             "deltas": [delta.to_dict() for delta in self.deltas],
@@ -187,7 +262,14 @@ class CatalogFeedEntry:
     def from_dict(cls, payload: Mapping[str, Any]) -> CatalogFeedEntry:
         _exact_keys(
             payload,
-            {"public_name", "current_version", "source_updated_at", "base", "deltas"},
+            {
+                "public_name",
+                "current_version",
+                "rows",
+                "source_updated_at",
+                "base",
+                "deltas",
+            },
             "catalog feed entry",
         )
         public_name = validate_public_name(payload.get("public_name"))
@@ -214,6 +296,7 @@ class CatalogFeedEntry:
         entry = cls(
             public_name=public_name,
             current_version=current_version,
+            rows=_version(payload.get("rows"), "feed catalog rows"),
             source_updated_at=normalize_rfc3339_utc(
                 _require_non_empty_string(
                     payload.get("source_updated_at"), "catalog source_updated_at"
@@ -223,6 +306,12 @@ class CatalogFeedEntry:
             deltas=deltas,
         )
         _validate_reference_urls(entry)
+        expected_rows = entry.base.rows
+        for delta in entry.deltas:
+            if delta.from_version >= entry.base.version:
+                expected_rows += delta.recognition.added - delta.recognition.deleted
+        if entry.rows != expected_rows:
+            raise ValidationError("feed catalog rows do not match its base and deltas")
         return entry
 
 
@@ -303,6 +392,7 @@ def update_catalog_feed(
         base_path = Path(records[base_index][0])
         base = SnapshotReference(
             version=base_manifest.version,
+            rows=base_manifest.rows,
             manifest=_file_reference(base_path, public_name, base_manifest.version, base_path.name),
             assets=_asset_references(public_name, base_manifest.version, base_manifest.base or {}),
         )
@@ -317,6 +407,7 @@ def update_catalog_feed(
             CatalogFeedEntry(
                 public_name=public_name,
                 current_version=current.version,
+                rows=current.rows,
                 source_updated_at=current.source_revision.updated_at,
                 base=base,
                 deltas=deltas,
@@ -363,13 +454,14 @@ def _file_reference(
 
 def _asset_references(
     public_name: str, version: int, assets: Mapping[str, PublishedAsset]
-) -> dict[str, FileReference]:
+) -> dict[str, AssetReference]:
     return {
-        name: FileReference.from_dict(
+        name: AssetReference.from_dict(
             {
                 "url": _url(public_name, version, asset.path),
                 "sha256": asset.sha256,
                 "size": asset.size,
+                "rows": asset.rows,
             }
         )
         for name, asset in sorted(assets.items())
@@ -382,6 +474,9 @@ def _delta_reference(path: Path, manifest: CatalogVersionManifest) -> DeltaRefer
     return DeltaReference(
         from_version=manifest.delta.from_version,
         to_version=manifest.version,
+        rows=manifest.delta.rows,
+        recognition=manifest.delta.recognition,
+        metadata=manifest.delta.metadata,
         manifest=_file_reference(path, manifest.public_name, manifest.version, path.name),
         assets=_asset_references(manifest.public_name, manifest.version, manifest.delta.assets),
     )
@@ -410,7 +505,7 @@ def _validate_manifest_files(path: Path, manifest: CatalogVersionManifest) -> No
 
 
 def _validate_reference_urls(entry: CatalogFeedEntry) -> None:
-    stages: list[tuple[int, FileReference, Mapping[str, FileReference]]] = [
+    stages: list[tuple[int, FileReference, Mapping[str, AssetReference]]] = [
         (entry.base.version, entry.base.manifest, entry.base.assets),
         *((delta.to_version, delta.manifest, delta.assets) for delta in entry.deltas),
     ]
@@ -420,3 +515,34 @@ def _validate_reference_urls(entry: CatalogFeedEntry) -> None:
             not reference.url.startswith(expected) for reference in assets.values()
         ):
             raise ValidationError("feed file URL does not match its catalog stage")
+
+
+def _validate_delta_rows(delta: DeltaReference) -> None:
+    recognition = delta.recognition
+    metadata = delta.metadata
+    if not max(recognition.total, metadata.total) <= delta.rows <= (
+        recognition.total + metadata.total
+    ):
+        raise ValidationError("feed delta rows must count unique affected rows")
+    if recognition.total:
+        if (
+            "identifiers" not in delta.assets
+            or delta.assets["identifiers"].rows != recognition.total
+        ):
+            raise ValidationError("feed delta identifier rows do not match recognition changes")
+    elif {"embeddings", "identifiers"}.intersection(delta.assets):
+        raise ValidationError("empty feed recognition delta cannot contain recognition assets")
+    recognition_upserts = recognition.added + recognition.updated
+    if recognition_upserts:
+        if (
+            "embeddings" not in delta.assets
+            or delta.assets["embeddings"].rows != recognition_upserts
+        ):
+            raise ValidationError("feed delta embedding rows do not match recognition upserts")
+    elif "embeddings" in delta.assets:
+        raise ValidationError("delete-only feed recognition delta cannot contain embeddings")
+    if metadata.total:
+        if "metadata" not in delta.assets or delta.assets["metadata"].rows != metadata.total:
+            raise ValidationError("feed delta metadata rows do not match metadata changes")
+    elif "metadata" in delta.assets:
+        raise ValidationError("empty feed metadata delta cannot contain metadata")

@@ -73,11 +73,20 @@ def test_initial_base_only_feed(workspace: Path) -> None:
     assert feed.to_dict().keys() == {"checked_at", "catalogs"}
     assert entry.public_name == "scryfall-mtg"
     assert entry.current_version == 0
+    assert entry.rows == 1
     assert entry.base.version == 0
+    assert entry.base.rows == 1
     assert set(entry.base.assets) == {"embeddings", "identifiers", "metadata"}
+    assert entry.base.assets["identifiers"].rows == 1
     assert entry.deltas == ()
     assert "/scryfall-mtg/version/0/manifest.json" in entry.base.manifest.url
     assert set(entry.base.manifest.to_dict()) == {"url", "sha256", "size"}
+    assert set(entry.base.assets["identifiers"].to_dict()) == {
+        "url",
+        "sha256",
+        "size",
+        "rows",
+    }
 
 
 def test_version_zero_delta_chain(workspace: Path) -> None:
@@ -92,6 +101,10 @@ def test_version_zero_delta_chain(workspace: Path) -> None:
         (0, 1),
         (1, 2),
     ]
+    assert entry.deltas[0].rows == 1
+    assert entry.deltas[0].recognition.updated == 1
+    assert entry.deltas[0].metadata.updated == 1
+    assert entry.deltas[0].assets["embeddings"].rows == 1
 
 
 def test_routine_checkpoint_keeps_bridge_delta(workspace: Path) -> None:
@@ -149,6 +162,21 @@ def test_asset_integrity_is_checked(workspace: Path) -> None:
 
     with pytest.raises(ValidationError, match="integrity"):
         _feed([record])
+
+
+def test_inconsistent_row_summaries_are_rejected(workspace: Path) -> None:
+    build0, record0 = _publish(workspace, 0)
+    _, record1 = _publish(workspace, 1, build0)
+    payload = _feed([record0, record1]).to_dict()
+    payload["catalogs"][CATALOG_KEY]["rows"] += 1
+
+    with pytest.raises(ValidationError, match="base and deltas"):
+        CatalogFeed.from_dict(payload)
+
+    payload = _feed([record0, record1]).to_dict()
+    payload["catalogs"][CATALOG_KEY]["deltas"][0]["assets"]["embeddings"]["rows"] += 1
+    with pytest.raises(ValidationError, match="embedding rows"):
+        CatalogFeed.from_dict(payload)
 
 
 def test_deterministic_serialization_round_trip(workspace: Path) -> None:
