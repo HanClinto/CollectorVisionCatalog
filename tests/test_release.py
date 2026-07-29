@@ -79,6 +79,20 @@ def test_assembles_seed_release_atomically_and_preserves_summaries(workspace: Pa
     assert sorted(quality["catalogs"]) == sorted(assembled.catalogs)
 
 
+def test_release_rejects_incorrect_feed_manifest_size(workspace: Path) -> None:
+    seed = workspace / "seed"
+    _seed(seed, "demo/catalog")
+    output = workspace / "release"
+    assemble_seed_release([seed], output, VERSION)
+    feed_path = output / "catalog-feed-v2.json"
+    payload = json.loads(feed_path.read_text())
+    payload["catalogs"]["demo/catalog"]["base"]["manifest"]["size"] += 1
+    feed_path.write_text(json.dumps(payload))
+
+    with pytest.raises(ValidationError, match="reference does not match index"):
+        validate_release(output)
+
+
 def test_assembly_rejects_existing_output_duplicate_key_and_version(workspace: Path) -> None:
     first = workspace / "first"
     second = workspace / "second"
@@ -163,9 +177,7 @@ def test_assembly_rejects_tampered_manifest_asset_and_non_seed(workspace: Path) 
         {"demo/incremental": incremental_manifest},
     )
     (incremental / "quality-report.json").write_text(
-        json.dumps(
-            {"version": VERSION, "catalogs": {"demo/incremental": {"excluded_rows": 0}}}
-        )
+        json.dumps({"version": VERSION, "catalogs": {"demo/incremental": {"excluded_rows": 0}}})
     )
     (incremental / "seed-summary.json").write_text(json.dumps({"version": VERSION}))
     with pytest.raises(ValidationError, match="seed manifest"):
@@ -311,5 +323,6 @@ def test_source_status_cli_reports_latest_revision(monkeypatch, capsys) -> None:
     )
     assert ASSEMBLE_RELEASE.main(["source-status"]) == 0
     payload = json.loads(capsys.readouterr().out)
+    assert payload["checked_at"].endswith("Z")
     assert payload["source_updated_at"] == scryfall.updated_at
     assert payload["suggested_date_suffix"] == "2026-07-24"

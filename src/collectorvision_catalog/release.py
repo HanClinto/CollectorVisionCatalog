@@ -5,6 +5,7 @@ import os
 import re
 import shutil
 from collections.abc import Mapping, Sequence
+from datetime import datetime, timezone
 from hashlib import sha256
 from pathlib import Path
 from typing import Any
@@ -77,9 +78,7 @@ def assemble_seed_release(
         summary = _load_versioned_mapping(source / SEED_SUMMARY_FILENAME, version, "seed summary")
         catalog_keys = sorted(index.catalogs)
         if set(quality_entries) != set(catalog_keys):
-            raise ValidationError(
-                f"quality report catalog keys do not match index in {source}"
-            )
+            raise ValidationError(f"quality report catalog keys do not match index in {source}")
         summaries.append({"catalog_keys": catalog_keys, "summary": summary})
 
         for catalog_key, entry in index.catalogs.items():
@@ -113,6 +112,9 @@ def assemble_seed_release(
             update_catalog_feed(
                 current_index=combined_index,
                 current_manifests=combined_manifests,
+                checked_at=datetime.now(timezone.utc)
+                .isoformat(timespec="seconds")
+                .replace("+00:00", "Z"),
             ),
         )
         (temporary / QUALITY_FILENAME).write_bytes(
@@ -150,30 +152,47 @@ def validate_release(
     feed_path = directory / FEED_FILENAME
     if feed_path.is_file():
         feed = load_catalog_feed(feed_path)
-        if feed.release_version != index.release_version:
-            raise ValidationError("catalog feed release_version does not match index")
+        if feed.release_version not in {entry.latest_version for entry in feed.catalogs.values()}:
+            raise ValidationError("catalog feed release_version is not represented")
+        if feed.source_updated_at != index.source_updated_at:
+            raise ValidationError("catalog feed source_updated_at does not match index")
         if set(feed.catalogs) != set(index.catalogs):
             raise ValidationError("catalog feed keys do not match index")
         for key, entry in feed.catalogs.items():
             if entry.latest_version != index.release_version:
                 manifest = manifests[key][1]
-                if (
-                    manifest.delta.operations
-                    or manifest.delta.metadata_operations
-                ):
-                    raise ValidationError(
-                        f"catalog feed omits current changes for {key!r}"
-                    )
+                if manifest.delta.operations or manifest.delta.metadata_operations:
+                    raise ValidationError(f"catalog feed omits current changes for {key!r}")
                 continue
             reference = entry.base if not entry.deltas else entry.deltas[-1]
             indexed = index.catalogs[key]
             if (
-                reference.manifest_filename != indexed.manifest_filename
-                or reference.sha256 != indexed.sha256
+                reference.manifest.filename != indexed.manifest_filename
+                or reference.manifest.sha256 != indexed.sha256
+                or reference.manifest.size != manifests[key][0].stat().st_size
             ):
-                raise ValidationError(
-                    f"catalog feed reference does not match index for {key!r}"
-                )
+                raise ValidationError(f"catalog feed reference does not match index for {key!r}")
+            manifest = manifests[key][1]
+            allowed_names = (
+                ("recognition_rows", "recognition_matrix", "metadata_rows")
+                if not entry.deltas
+                else ("delta_operations", "delta_matrix", "metadata_delta")
+            )
+            expected_assets = {
+                name: manifest.assets[name] for name in allowed_names if name in manifest.assets
+            }
+            if set(reference.assets) != set(expected_assets):
+                raise ValidationError(f"catalog feed assets do not match manifest for {key!r}")
+            for name, asset in expected_assets.items():
+                feed_asset = reference.assets[name]
+                if (
+                    feed_asset.filename != asset.filename
+                    or feed_asset.sha256 != asset.sha256
+                    or feed_asset.size != asset.size
+                ):
+                    raise ValidationError(
+                        f"catalog feed asset {name!r} does not match manifest for {key!r}"
+                    )
     _flat_release_files(directory)
     checksum_path = directory / CHECKSUM_FILENAME
     if verify_checksums and checksum_path.exists():

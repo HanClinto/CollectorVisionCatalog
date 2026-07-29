@@ -37,49 +37,31 @@ jobs:
           mkdir -p "$root"
           cp catalog-feed-v2.json "$root/catalog-feed-v2.json"
 
-          declare -A roles
-          while IFS=$'\t' read -r version role; do
-            existing="${roles[$version]:-}"
-            if [ -n "$existing" ] && [ "$existing" != "$role" ]; then
-              roles[$version]="both"
-            else
-              roles[$version]="$role"
-            fi
-          done < <(python - <<'PY'
-          import json
-
-          with open("catalog-feed-v2.json") as stream:
-              feed = json.load(stream)
-          for entry in feed["catalogs"].values():
-              print(entry["base"]["version"], "full", sep="\t")
-              for delta in entry["deltas"]:
-                  print(delta["to"], "delta", sep="\t")
-          PY
-          )
-
-          for version in "${!roles[@]}"; do
-            role="${roles[$version]}"
+          while IFS=$'\t' read -r version filename; do
             destination="$root/$version"
             mkdir -p "$destination"
             gh release download "$version" \
               --repo "$GITHUB_REPOSITORY" \
-              --pattern "catalog-index-v2.json" \
-              --pattern "*.manifest.json" \
+              --pattern "$filename" \
               --dir "$destination"
-            if [ "$role" = "full" ] || [ "$role" = "both" ]; then
-              gh release download "$version" \
-                --repo "$GITHUB_REPOSITORY" \
-                --pattern "*.recognition.*.gz" \
-                --pattern "*.metadata.jsonl.gz" \
-                --dir "$destination"
-            fi
-            if [ "$role" = "delta" ] || [ "$role" = "both" ]; then
-              gh release download "$version" \
-                --repo "$GITHUB_REPOSITORY" \
-                --pattern "*.delta.*.gz" \
-                --dir "$destination"
-            fi
-          done
+          done < <(python - <<'PY'
+          import json
+          from urllib.parse import unquote, urlparse
+
+          with open("catalog-feed-v2.json") as stream:
+              feed = json.load(stream)
+          files = set()
+          for entry in feed["catalogs"].values():
+              for stage in [entry["base"], *entry["deltas"]]:
+                  version = stage.get("version", stage.get("to"))
+                  references = [stage["manifest"], *stage["assets"].values()]
+                  for reference in references:
+                      filename = unquote(urlparse(reference["url"]).path).rsplit("/", 1)[-1]
+                      files.add((version, filename))
+          for version, filename in sorted(files):
+              print(version, filename, sep="\t")
+          PY
+          )
 
       - uses: actions/configure-pages@v5
         with:

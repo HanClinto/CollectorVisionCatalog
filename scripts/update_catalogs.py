@@ -12,6 +12,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -165,8 +166,7 @@ def fetch_scryfall_revision(source: Mapping[str, Any]) -> SourceRevision:
 def fetch_scryfall_snapshot(source: dict[str, Any]) -> SourceSnapshot[RecognitionRow]:
     revision = fetch_scryfall_revision(source)
     languages = {
-        _required_text(language, "scryfall language")
-        for language in source.get("languages", [])
+        _required_text(language, "scryfall language") for language in source.get("languages", [])
     }
 
     rows: list[RecognitionRow] = []
@@ -234,16 +234,12 @@ def _fetch_tcgcsv_category_rows(
     if category is None:
         raise ValidationError(f"TCGCSV does not contain category {category_id}")
 
-    groups_payload = _read_json_url(
-        f"https://tcgcsv.com/tcgplayer/{category_id}/groups"
-    )
+    groups_payload = _read_json_url(f"https://tcgcsv.com/tcgplayer/{category_id}/groups")
     groups = _response_results(groups_payload, f"TCGCSV category {category_id} groups")
 
     def fetch_group(group: dict[str, Any]) -> tuple[dict[str, Any], list[dict[str, Any]]]:
         group_id = _non_negative_int(group.get("groupId"), "tcgcsv groupId")
-        payload = _read_json_url(
-            f"https://tcgcsv.com/tcgplayer/{category_id}/{group_id}/products"
-        )
+        payload = _read_json_url(f"https://tcgcsv.com/tcgplayer/{category_id}/{group_id}/products")
         return group, _response_results(payload, f"TCGCSV group {group_id} products")
 
     rows: list[RecognitionRow] = []
@@ -279,8 +275,7 @@ def fetch_tcgcsv_snapshots(
     if after != before:
         raise ValidationError("TCGCSV source changed while catalogs were being fetched")
     return {
-        key: SourceSnapshot(revision=before, rows=tuple(rows))
-        for key, rows in rows_by_key.items()
+        key: SourceSnapshot(revision=before, rows=tuple(rows)) for key, rows in rows_by_key.items()
     }
 
 
@@ -305,6 +300,7 @@ def build_enabled_catalogs(
     batch_size: int = 16,
     source_rows_factory: Callable[[dict[str, Any]], list[RecognitionRow]] | None = None,
     expected_source_revisions: Mapping[str, SourceRevision] | None = None,
+    checked_at: str | None = None,
     embedder_factory: Callable[[str, int], Embedder] | None = None,
     image_loader: ImageLoader | None = None,
 ) -> dict[str, Any]:
@@ -318,6 +314,9 @@ def build_enabled_catalogs(
     quality_reports: dict[str, Any] = {}
     quality_rules = load_quality_rules(quality_overrides_path)
     expected_source_revisions = expected_source_revisions or {}
+    checked_at = checked_at or datetime.now(timezone.utc).isoformat(timespec="seconds").replace(
+        "+00:00", "Z"
+    )
     snapshots: dict[str, SourceSnapshot[RecognitionRow]] = {}
     if source_rows_factory is not None:
         for config in configs:
@@ -334,9 +333,7 @@ def build_enabled_catalogs(
             )
     else:
         tcg_sources = {
-            config.key: config.source
-            for config in configs
-            if config.source.get("type") == "tcgcsv"
+            config.key: config.source for config in configs if config.source.get("type") == "tcgcsv"
         }
         if tcg_sources:
             expected_tcg = {
@@ -401,9 +398,7 @@ def build_enabled_catalogs(
                         strict=True,
                     )
                 )
-                seed_fingerprints = {
-                    row.key: row.image_fingerprint for row in previous.rows
-                }
+                seed_fingerprints = {row.key: row.image_fingerprint for row in previous.rows}
                 previous = None
         elif config.seed_required and not allow_full_rebuild:
             raise ValidationError(
@@ -437,9 +432,7 @@ def build_enabled_catalogs(
                     f"examples: {missing_seed_keys[:3]}"
                 )
             seed_embeddings = {
-                key: embedding
-                for key, embedding in seed_embeddings.items()
-                if key in reusable_keys
+                key: embedding for key, embedding in seed_embeddings.items() if key in reusable_keys
             }
         unavailable_keys: set[str] = set()
         if source_type == "tcgcsv" and cache_root is not None:
@@ -454,9 +447,7 @@ def build_enabled_catalogs(
                 else {row.key: row.image_fingerprint for row in previous.rows}
             )
             refresh_rows = [
-                row
-                for row in rows
-                if previous_fingerprints.get(row.key) != row.image_fingerprint
+                row for row in rows if previous_fingerprints.get(row.key) != row.image_fingerprint
             ]
             if refresh_rows:
                 refresh_cache = TCGplayerImageCache(
@@ -508,9 +499,7 @@ def build_enabled_catalogs(
                 raise AssertionError(f"unsupported source type {source_type!r}")
         else:
             fallback_loader = (
-                tcgplayer_network_image_loader
-                if source_type == "tcgcsv"
-                else default_image_loader
+                tcgplayer_network_image_loader if source_type == "tcgcsv" else default_image_loader
             )
             effective_image_loader = local_first_image_loader(
                 rows,
@@ -545,9 +534,7 @@ def build_enabled_catalogs(
                 "delta_operations": build.manifest.delta.operations,
                 "metadata_delta_operations": build.manifest.delta.metadata_operations,
                 "seed_embeddings_reused": (
-                    0
-                    if seed_embeddings is None
-                    else len(rows) - len(missing_seed_keys)
+                    0 if seed_embeddings is None else len(rows) - len(missing_seed_keys)
                 ),
                 "seed_embeddings_computed": (
                     0 if seed_embeddings is None else len(missing_seed_keys)
@@ -566,20 +553,24 @@ def build_enabled_catalogs(
     index = write_catalog_index(index_path, version, manifests)
     previous_index_path = previous_dir / "catalog-index-v2.json"
     previous_feed_path = previous_dir / FEED_FILENAME
+    previous_index = (
+        load_catalog_index(previous_index_path) if previous_index_path.is_file() else None
+    )
     feed = update_catalog_feed(
         current_index=index,
-        current_manifests={
-            key: load_manifest(path) for key, path in manifests.items()
-        },
-        previous_index=(
-            load_catalog_index(previous_index_path)
-            if previous_index_path.is_file()
+        current_manifests={key: load_manifest(path) for key, path in manifests.items()},
+        checked_at=checked_at,
+        previous_index=previous_index,
+        previous_manifests=(
+            {
+                key: load_manifest(previous_dir / entry.manifest_filename)
+                for key, entry in previous_index.catalogs.items()
+            }
+            if previous_index is not None
             else None
         ),
         previous_feed=(
-            load_catalog_feed(previous_feed_path)
-            if previous_feed_path.is_file()
-            else None
+            load_catalog_feed(previous_feed_path) if previous_feed_path.is_file() else None
         ),
     )
     write_catalog_feed(output_dir / FEED_FILENAME, feed)
@@ -713,10 +704,7 @@ def refresh_tcgplayer_images(
         raise ValidationError("image workers must be positive")
     unavailable_keys: set[str] = set()
     with ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = {
-            executor.submit(image_cache, row.image_url): row
-            for row in rows
-        }
+        futures = {executor.submit(image_cache, row.image_url): row for row in rows}
         try:
             for future in as_completed(futures):
                 row = futures[future]
@@ -759,8 +747,7 @@ class ScryfallImageCache:
     def is_current(self, row: RecognitionRow) -> bool:
         paths, revision = self._entries[row.image_url]
         return any(
-            path.is_file()
-            and (revision == 0 or abs(path.stat().st_mtime - revision) < 1.0)
+            path.is_file() and (revision == 0 or abs(path.stat().st_mtime - revision) < 1.0)
             for path in paths
         )
 
@@ -772,9 +759,7 @@ class ScryfallImageCache:
                 f"image URL is not part of this Scryfall build: {image_url}"
             ) from error
         for path in paths:
-            if path.is_file() and (
-                revision == 0 or abs(path.stat().st_mtime - revision) < 1.0
-            ):
+            if path.is_file() and (revision == 0 or abs(path.stat().st_mtime - revision) < 1.0):
                 return _open_rgb_image(path)
 
         request = Request(
@@ -831,8 +816,7 @@ def _download_tcgplayer_image(image_url: str, attempts: int = 6) -> bytes:
                 last_error = error
                 candidate_errors.append(error)
         if candidate_errors and all(
-            isinstance(error, HTTPError) and error.code in {403, 404}
-            for error in candidate_errors
+            isinstance(error, HTTPError) and error.code in {403, 404} for error in candidate_errors
         ):
             raise TCGplayerImageUnavailable(
                 f"TCGplayer has no available image variant for {image_url}"
@@ -862,12 +846,7 @@ class TCGplayerImageCache:
     def path_for_row(self, row: RecognitionRow) -> Path:
         product_id = _positive_decimal_id(row.identifiers["tcgplayer_product"], row.key)
         suffix = "" if row.face_index == 0 else f"_{row.face_index}"
-        return (
-            self.images_root
-            / product_id[0]
-            / product_id[1]
-            / f"{product_id}{suffix}.jpg"
-        )
+        return self.images_root / product_id[0] / product_id[1] / f"{product_id}{suffix}.jpg"
 
     def is_cached(self, row: RecognitionRow) -> bool:
         return _is_valid_image_file(self.path_for_row(row))
@@ -1000,13 +979,9 @@ def _count_changed_image_rows(
     rows: Sequence[RecognitionRow],
     previous: CatalogBuild,
 ) -> int:
-    previous_fingerprints = {
-        row.key: row.image_fingerprint
-        for row in previous.rows
-    }
+    previous_fingerprints = {row.key: row.image_fingerprint for row in previous.rows}
     changed_or_added = sum(
-        previous_fingerprints.get(row.key) != row.image_fingerprint
-        for row in rows
+        previous_fingerprints.get(row.key) != row.image_fingerprint for row in rows
     )
     current_keys = {row.key for row in rows}
     removed = len(set(previous_fingerprints).difference(current_keys))
@@ -1051,18 +1026,19 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     expected_revisions: dict[str, SourceRevision] = {}
+    checked_at = None
     if args.expected_source_revisions is not None:
         payload = json.loads(args.expected_source_revisions.read_text(encoding="utf-8"))
+        checked_at = payload.get("checked_at")
+        if not isinstance(checked_at, str):
+            raise ValidationError("expected source revisions checked_at must be a string")
         raw_catalogs = payload.get("catalogs")
         if not isinstance(raw_catalogs, dict):
             raise ValidationError("expected source revisions catalogs must be an object")
         expected_revisions = {
-            str(key): SourceRevision.from_dict(value)
-            for key, value in raw_catalogs.items()
+            str(key): SourceRevision.from_dict(value) for key, value in raw_catalogs.items()
         }
-        enabled_keys = {
-            config.key for config in load_config(args.config) if config.enabled
-        }
+        enabled_keys = {config.key for config in load_config(args.config) if config.enabled}
         if set(expected_revisions) != enabled_keys:
             raise ValidationError(
                 "expected source revision catalogs must exactly match enabled catalogs"
@@ -1078,6 +1054,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         cache_root=args.cache_root,
         batch_size=args.batch_size,
         expected_source_revisions=expected_revisions,
+        checked_at=checked_at,
     )
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0

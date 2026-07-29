@@ -65,6 +65,7 @@ def test_feed_tracks_ordered_deltas_and_rolls_checkpoint(workspace: Path) -> Non
         feed = update_catalog_feed(
             current_index=index,
             current_manifests={CATALOG_KEY: build.manifest},
+            checked_at=f"2026-07-{number:02d}T00:00:00Z",
             previous_index=previous_index,
             previous_feed=feed,
         )
@@ -95,18 +96,34 @@ def test_unchanged_catalog_keeps_prior_feed_position(workspace: Path) -> None:
     first_feed = update_catalog_feed(
         current_index=first_index,
         current_manifests={CATALOG_KEY: first.manifest},
+        checked_at="2026-07-01T00:00:00Z",
     )
     second, second_index = _release(workspace, "v2", "Alpha", first)
 
     current = update_catalog_feed(
         current_index=second_index,
         current_manifests={CATALOG_KEY: second.manifest},
+        checked_at="2026-07-02T00:00:00Z",
         previous_index=first_index,
         previous_feed=first_feed,
     )
 
-    assert current.release_version == "v2"
+    assert current.release_version == "v1"
     assert current.catalogs[CATALOG_KEY] == first_feed.catalogs[CATALOG_KEY]
+    assert current.checked_at == "2026-07-02T00:00:00Z"
+    assert current.source_updated_at == second_index.source_updated_at
+
+    third, third_index = _release(workspace, "v3", "Alpha", second)
+    refreshed = update_catalog_feed(
+        current_index=third_index,
+        current_manifests={CATALOG_KEY: third.manifest},
+        checked_at="2026-07-03T00:00:00Z",
+        previous_index=second_index,
+        previous_feed=current,
+    )
+
+    assert refreshed.release_version == "v1"
+    assert refreshed.checked_at == "2026-07-03T00:00:00Z"
 
 
 def test_repository_feed_is_valid() -> None:

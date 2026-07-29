@@ -50,29 +50,50 @@ CollectorVisionCatalog Pages for normal clients:
 https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-feed-v2.json
 ```
 
-For each catalog, the feed names one complete base manifest and an ordered list
-of exact-base delta manifests:
+The top level distinguishes upstream freshness from artifact publication:
+`checked_at` records the most recent source check even when nothing changed,
+while `source_updated_at` records the newest upstream revision represented.
+Each catalog entry also has its own `source_updated_at`, so a newer source cannot
+make an unrelated catalog appear fresher than it is.
+
+For each catalog, the feed is a self-contained download plan: one complete base
+and an ordered list of exact-base deltas. Every client file has an absolute URL,
+SHA-256 checksum, and byte size:
 
 ```json
 {
+  "checked_at": "2026-08-04T10:17:00Z",
+  "source_updated_at": "2026-08-04T08:03:12Z",
   "base": {
     "version": "catalog-v2-beta.4-2026-07-28",
-    "manifest_filename": "milo1--scryfall--mtg.manifest.json",
-    "sha256": "..."
+    "manifest": {
+      "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.4-2026-07-28/milo1--scryfall--mtg.manifest.json",
+      "sha256": "...",
+      "size": 1791
+    },
+    "assets": {
+      "recognition_rows": {"url": "https://...jsonl.gz", "sha256": "...", "size": 5710019},
+      "recognition_matrix": {"url": "https://...f16.gz", "sha256": "...", "size": 25887836},
+      "metadata_rows": {"url": "https://...jsonl.gz", "sha256": "...", "size": 5177483}
+    }
   },
   "deltas": [
     {
       "from": "catalog-v2-beta.4-2026-07-28",
       "to": "catalog-v2-beta.5-2026-08-04",
-      "manifest_filename": "milo1--scryfall--mtg.manifest.json",
-      "sha256": "..."
+      "manifest": {"url": "https://...manifest.json", "sha256": "...", "size": 1844},
+      "assets": {
+        "delta_operations": {"url": "https://...delta.jsonl.gz", "sha256": "...", "size": 4812},
+        "delta_matrix": {"url": "https://...delta.f16.gz", "sha256": "...", "size": 22418}
+      }
     }
   ]
 }
 ```
 
-The feed references manifests rather than duplicating their asset lists.
-Manifests remain authoritative for filenames, sizes, and checksums.
+The feed lists only client assets. Builder state and reports remain release
+assets but are intentionally excluded. Manifests remain authoritative, and
+clients verify that every feed file reference agrees with its manifest.
 
 Hugging Face remains the Catalog v1 host during migration. Catalog v2 does not
 replace or mutate v1 manifests.

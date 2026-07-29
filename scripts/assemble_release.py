@@ -5,6 +5,7 @@ import argparse
 import json
 import runpy
 from collections.abc import Sequence
+from datetime import datetime, timezone
 from pathlib import Path
 
 from collectorvision_catalog import ValidationError, max_source_updated_at
@@ -66,11 +67,12 @@ def main(argv: Sequence[str] | None = None) -> int:
             revisions[config.key] = revision
         source_updated_at = max_source_updated_at(revisions.values())
         payload = {
+            "checked_at": datetime.now(timezone.utc)
+            .isoformat(timespec="seconds")
+            .replace("+00:00", "Z"),
             "source_updated_at": source_updated_at,
             "suggested_date_suffix": source_updated_at[:10],
-            "catalogs": {
-                key: revision.to_dict() for key, revision in sorted(revisions.items())
-            },
+            "catalogs": {key: revision.to_dict() for key, revision in sorted(revisions.items())},
         }
         rendered = json.dumps(payload, indent=2, sort_keys=True) + "\n"
         if args.output is not None:
