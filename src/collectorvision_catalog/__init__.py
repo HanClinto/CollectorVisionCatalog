@@ -30,8 +30,19 @@ from .feed import (
     write_catalog_feed,
 )
 from .index import CatalogIndex, CatalogIndexEntry, load_catalog_index, write_catalog_index
+from .publication import (
+    CatalogVersionManifest,
+    load_catalog_version_manifest,
+    publish_catalog_version,
+)
 from .release import assemble_seed_release, validate_release, write_checksums
 from .sources.snapshots import SourceSnapshot
+from .versioning import (
+    CatalogVersionPlan,
+    plan_catalog_version,
+    validate_public_name,
+    version_root,
+)
 
 __all__ = [
     "AssetIntegrityError",
@@ -41,6 +52,8 @@ __all__ = [
     "CatalogIndex",
     "CatalogIndexEntry",
     "CatalogManifest",
+    "CatalogVersionPlan",
+    "CatalogVersionManifest",
     "CatalogFeed",
     "CatalogFeedEntry",
     "DeltaReference",
@@ -58,15 +71,20 @@ __all__ = [
     "load_catalog_build",
     "load_catalog_feed",
     "load_catalog_index",
+    "load_catalog_version_manifest",
     "load_delta_bundle",
     "load_manifest",
     "manifest_filename_for_catalog",
     "normalize_rfc3339_utc",
+    "plan_catalog_version",
+    "publish_catalog_version",
     "max_source_updated_at",
     "validate_artifacts",
+    "validate_public_name",
     "validate_release",
     "update_catalog_feed",
     "write_checksums",
     "write_catalog_index",
     "write_catalog_feed",
+    "version_root",
 ]

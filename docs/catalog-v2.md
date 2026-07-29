@@ -6,8 +6,8 @@ Catalog v2 is designed to:
 
 1. Build automatically without retaining a permanent image cache.
 2. Download and embed only new or changed source images.
-3. Give new clients a complete snapshot and current clients a small,
-   one-release delta.
+3. Give new clients a recent complete checkpoint and current clients exact
+   predecessor deltas.
 4. Keep recognition data small while allowing optional metadata.
 5. Represent peer source identifiers and card faces without implying authority
    or hierarchy among identifier systems.
@@ -16,84 +16,27 @@ Catalog v2 is designed to:
 
 ## Publication model
 
-Catalog v2 is published from `HanClinto/CollectorVisionCatalog` as immutable
-GitHub Releases. A release tag identifies one atomic catalog generation:
+Catalog v2 is published from `HanClinto/CollectorVisionCatalog`. Immutable
+versions advance independently for each catalog only when that catalog changes:
 
 ```text
-catalog-v2-beta.<N>-YYYY-MM-DD
+catalog-v2/<public-name>/version/<N>/
 ```
 
-Every beta release contains `catalog-index-v2.json`. During beta, clients use an
-explicit reviewed tag, such as `catalog-v2-beta.1-2026-07-24`, rather than a
-moving `latest` URL. Beta releases are prereleases and do not become stable
-`latest`:
-
-```text
-https://github.com/HanClinto/CollectorVisionCatalog/releases/download/<tag>/catalog-index-v2.json
-```
-
-The beta number increases monotonically. The index maps a stable key such as
-`milo1/scryfall/mtg` to a manifest filename and SHA-256 checksum. Catalog keys
-encode the model, source, and game; the index does not duplicate manifest
-metadata. Release assets are flat because GitHub Release assets do not have
-directories; filenames use a collision-free catalog slug.
-
-The date suffix is the UTC date of the index's maximum `source_updated_at`, not
-the build date. The index contains that maximum timestamp once; individual
-source provenance remains in each manifest for builders and audits.
-
-Each release also contains an immutable `catalog-feed-v2.json` snapshot. The
-canonical moving copy is committed at the repository root and published from
-CollectorVisionCatalog Pages for normal clients:
+The moving feed is published at:
 
 ```text
 https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-feed-v2.json
 ```
 
-The top level distinguishes upstream freshness from artifact publication:
-`checked_at` records the most recent source check even when nothing changed,
-while `source_updated_at` records the newest upstream revision represented.
-Each catalog entry also has its own `source_updated_at`, so a newer source cannot
-make an unrelated catalog appear fresher than it is.
+`checked_at` advances even when no catalog changes. Each catalog entry records
+its own source freshness and supported routes to its current version. Dates are
+manifest metadata, not storage identity.
 
-For each catalog, the feed is a self-contained download plan: one complete base
-and an ordered list of exact-base deltas. Every client file has an absolute URL,
-SHA-256 checksum, and byte size:
-
-```json
-{
-  "checked_at": "2026-08-04T10:17:00Z",
-  "source_updated_at": "2026-08-04T08:03:12Z",
-  "base": {
-    "version": "catalog-v2-beta.5-2026-07-28",
-    "manifest": {
-      "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-v2-beta.5-2026-07-28/milo1--scryfall--mtg.manifest.json",
-      "sha256": "...",
-      "size": 1791
-    },
-    "assets": {
-      "identifiers": {"url": "https://...identifiers.jsonl.gz", "sha256": "...", "size": 5710019},
-      "embeddings": {"url": "https://...embeddings.f16.gz", "sha256": "...", "size": 25887836},
-      "metadata": {"url": "https://...metadata.jsonl.gz", "sha256": "...", "size": 5177483}
-    }
-  },
-  "deltas": [
-    {
-      "from": "catalog-v2-beta.5-2026-07-28",
-      "to": "catalog-v2-beta.6-2026-08-04",
-      "manifest": {"url": "https://...manifest.json", "sha256": "...", "size": 1844},
-      "assets": {
-        "identifiers_delta": {"url": "https://...identifiers.delta.jsonl.gz", "sha256": "...", "size": 4812},
-        "embeddings_delta": {"url": "https://...embeddings.delta.f16.gz", "sha256": "...", "size": 22418}
-      }
-    }
-  ]
-}
-```
-
-The feed lists only client assets. Builder state and reports remain release
-assets but are intentionally excluded. Manifests remain authoritative, and
-clients verify that every feed file reference agrees with its manifest.
+The complete catalog-local numbering rules, routine and hard checkpoints,
+public paths, feed routing, and manifest structure are defined in
+[Catalog v2 versioning and paths](versioning.md). Discarded prototypes do not
+receive aliases or fallback parsers.
 
 Hugging Face remains the Catalog v1 host during migration. Catalog v2 does not
 replace or mutate v1 manifests.
@@ -196,26 +139,15 @@ image download or inference.
 
 ## Full snapshots and deltas
 
-Every release publishes:
+Version 0 contains a complete base. Changed catalogs normally publish only an
+exact-predecessor delta. At the configured checkpoint interval—10 versions by
+default—a routine checkpoint publishes both a complete base and the predecessor
+delta. Existing clients continue incrementally while new clients start from the
+new base.
 
-- a full recognition snapshot;
-- full optional metadata;
-- updater state;
-- a delta whose `base_version` is the immediately preceding release.
-
-Recognition deltas contain `upsert` and `delete` operations. Upserts refer to
-rows in a compact FP16 delta matrix. Metadata has its own upsert/delete delta.
-A versioned client must apply a delta only when its installed version exactly equals
-`base_version`; otherwise it downloads the full snapshot.
-
-A seed manifest has `base_version: null` and zero recognition and metadata
-operations. It has no delta assets. A seed is installed from its full snapshot;
-`apply_delta(None, seed)` is invalid.
-
-The discovery feed advertises at most four consecutive deltas. The next changed
-release becomes a new base checkpoint, keeping bootstrap work bounded to roughly
-one month of weekly updates. Every release still carries a full snapshot, so a
-client can always skip the chain and install any explicit release directly.
+A hard checkpoint publishes a base without a delta and deliberately forces a
+full refresh. See [Catalog v2 versioning and paths](versioning.md) for the exact
+rules and manifest shapes.
 
 ### Reconstructing historical Scryfall snapshots
 
@@ -229,7 +161,7 @@ python scripts/update_catalogs.py \
   --config /path/to/scryfall-only.json \
   --previous-dir /path/to/empty-directory \
   --output-dir historical-base \
-  --version catalog-v2-beta.100-2026-07-20 \
+  --version 0 \
   --allow-full-rebuild \
   --scryfall-bulk-uri https://data.scryfall.io/default-cards/default-cards-20260720123456.jsonl.gz \
   --scryfall-bulk-updated-at 2026-07-20T12:34:56Z \
@@ -239,7 +171,7 @@ python scripts/update_catalogs.py \
   --config /path/to/scryfall-only.json \
   --previous-dir historical-base \
   --output-dir historical-update \
-  --version catalog-v2-beta.101-2026-07-21 \
+  --version 1 \
   --scryfall-bulk-uri /path/to/default-cards-20260721123456.jsonl.gz \
   --scryfall-bulk-updated-at 2026-07-21T12:34:56Z \
   --cache-root /path/to/image-cache
@@ -250,55 +182,6 @@ produces normal identifier, embedding, and metadata deltas. `--scryfall-bulk-for
 can explicitly select `json` or `jsonl` when a filename has no recognizable
 extension. `--scryfall-bulk-identity` can record an archive-specific identifier;
 otherwise the normalized file or download URI is retained as the identity.
-
-## Seed assembly
-
-Scryfall and TCGplayer seeds are independently built into distinct directories,
-then validated and atomically assembled under one explicit beta version:
-
-```bash
-python scripts/assemble_release.py source-status --output source-status.json
-SOURCE_DATE="$(python -c 'import json; print(json.load(open("source-status.json"))["suggested_date_suffix"])')"
-VERSION="catalog-v2-beta.1-$SOURCE_DATE"
-
-COLLECTORVISION_PROVIDER=cpu python scripts/seed_scryfall.py \
-  --version "$VERSION" \
-  --expected-source-revisions source-status.json \
-  --cache-root /path/to/ccg_card_id/catalog \
-  --legacy-catalog /path/to/milo1-scryfall-mtg-latest.npz \
-  --output-dir scryfall-seed \
-  --build --max-downloads <reviewed-count>
-
-COLLECTORVISION_PROVIDER=cpu python scripts/seed_tcgplayer.py \
-  --version "$VERSION" \
-  --expected-source-revisions source-status.json \
-  --cache-root /path/to/ccg_card_id/catalog \
-  --legacy-dir /path/to/ccg_card_id/catalog/tcgplayer/collectorvision \
-  --output-dir tcgplayer-seed \
-  --build --max-downloads <reviewed-count>
-
-python scripts/assemble_release.py assemble \
-  --input-dir scryfall-seed \
-  --input-dir tcgplayer-seed \
-  --output-dir release \
-  --version "$VERSION"
-gh release create "$VERSION" --prerelease --latest=false release/*
-```
-
-The flat assembled release contains the combined index; all catalog manifests;
-full recognition, metadata, and updater-state assets; and merged quality and
-seed summaries. Delta assets are present only when they contain operations or
-embeddings. Each input summary retains the catalog keys contributed by that
-input.
-Assembly verifies the beta suffix against the combined index timestamp.
-
-After `update_catalogs.py`, the weekly producer validates the full snapshot and
-its exact-one-step deltas before upload:
-
-```bash
-python scripts/assemble_release.py validate \
-  --release-dir release --version "$VERSION"
-```
 
 ## Build algorithm
 
@@ -311,8 +194,8 @@ For each configured source/game/model tuple:
 5. Download changed images into bounded temporary batches.
 6. Embed each batch and immediately discard its images.
 7. Sort by stable key and write deterministic artifacts.
-8. Build and verify the one-step delta against the full snapshot.
-9. Publish all catalogs as one atomic GitHub Release.
+8. Build and verify the exact-predecessor delta against the full snapshot.
+9. Publish each changed catalog version and update the moving feed.
 
 If no valid previous release exists, the job requires an explicit seed input
 instead of silently attempting a full hosted-run rebuild.
@@ -378,13 +261,11 @@ incremental embedding updates. Prices are not downloaded.
 
 ## Compatibility and rollout
 
-1. Publish and validate seeded v2 snapshots without changing CollectorVision.
-2. Add an opt-in v2 client to CollectorVision Python and JavaScript.
-3. Make new embedding models v2-only.
-4. Keep Milo Catalog v1 manifests available for a documented transition
-   period.
-5. Retire v1 only after usage and issue reports show that supported clients
-   have migrated.
+CollectorVision Python and browser consumers have not yet been updated to this
+active contract. They must gain integer catalog versions, alternative
+checkpoint routes, and catalog-first URLs before the beta is testable end to
+end.
 
-Catalog schemas are versioned independently from embedding models. Clients
-must reject unsupported major schema versions rather than guessing.
+Catalog v1 remains supported independently. Catalog v2 has no compatibility
+requirement before its stable release, so discarded prototype code will be
+replaced rather than retained as aliases or fallback parsers.

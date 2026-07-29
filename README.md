@@ -1,148 +1,79 @@
 # CollectorVision Catalog
 
-Automated, incremental recognition catalogs for
+Ready-to-search card recognition data for
 [CollectorVision](https://github.com/HanClinto/CollectorVision).
 
-Catalog v2 separates the data needed for recognition from optional card
-metadata:
+Choose a game, load its catalog, and identify cards from image embeddings.
+Catalog v2 keeps recognition downloads small, offers optional card metadata,
+and updates changed cards without repeatedly downloading the entire catalog.
 
-- **Recognition:** raw FP16 embeddings plus aligned rows containing a stable
-  per-face key and peer, explicitly named source identifiers.
-- **Metadata:** names, sets, languages, finishes, and other display fields.
-- **Updates:** a full snapshot for new installations plus a one-release delta
-  for existing installations.
+> [!NOTE]
+> Catalog v2 is in beta. Complete catalogs are available now; the final
+> incremental update feed is still being prepared.
 
-Images are build inputs, not release assets. A weekly build compares upstream
-records with the previous release, downloads and embeds only new or changed
-images, reuses unchanged embeddings, and then publishes immutable gzip assets
-to a GitHub Release.
+## Use it
 
-Scryfall and TCGCSV source data is streamed during builds, not redistributed.
-Every manifest, index entry, summary, and quality report records the upstream
-source identity, provenance URL, and normalized UTC update timestamp.
-
-Versioned rules in `config/source-quality-overrides.json` quarantine annotated,
-placeholder, or otherwise unsuitable source images before embedding. Builds
-emit `quality-report.json` with the affected row keys and reasons; quality data
-stays outside compact recognition records.
-
-## Status
-
-Catalog v2 is a beta discovered through an explicit release tag. CollectorVision
-Catalog v1 remains
-available from Hugging Face and is not changed by this repository.
-
-Scryfall publishes one default MTG catalog from its `default_cards` bulk data.
-Applications that do not want promos, art cards, tokens, or other extras should
-filter candidates during lookup rather than download a separate recognition
-catalog.
-
-The first production release will be seeded from the existing local Milo
-catalogs. Scheduled builds should only be enabled for a catalog after that seed
-release exists.
-
-## Development
+Install CollectorVision from GitHub during the beta:
 
 ```bash
-python -m pip install -e ".[dev]"
-pytest
-ruff check .
+python -m pip install \
+  "collectorvision @ git+https://github.com/HanClinto/CollectorVision.git"
 ```
 
-## Seeding the first release
+<details>
+<summary><strong>Python example</strong></summary>
 
-The weekly workflow intentionally does nothing until a v2 seed release exists.
-Build the seed on a machine with an ONNX Runtime backend and, optionally, your
-existing image cache:
+```python
+from PIL import Image
+import collector_vision as cv
 
-Capture the enabled source identities first. The latest source timestamp's UTC
-date, not the build date, is the beta suffix:
+catalog = cv.CatalogV2("mtg", include_metadata=True)
 
-```bash
-python -m pip install -e .
-python -m pip install onnxruntime \
-  "collectorvision[hf] @ git+https://github.com/HanClinto/CollectorVision.git@9d45a37ebfe40f22ece70507015645de134dc3ec"
+with Image.open("card.jpg") as image:
+    embedding = catalog.embedder.embed(image.convert("RGB"))
 
-python scripts/assemble_release.py source-status --output source-status.json
-SOURCE_DATE="$(python -c 'import json; print(json.load(open("source-status.json"))["suggested_date_suffix"])')"
-VERSION="catalog-v2-beta.1-$SOURCE_DATE"
-
-COLLECTORVISION_PROVIDER=cpu python scripts/seed_scryfall.py \
-  --version "$VERSION" \
-  --expected-source-revisions source-status.json \
-  --cache-root /path/to/ccg_card_id/catalog \
-  --legacy-catalog /path/to/milo1-scryfall-mtg-latest.npz \
-  --output-dir scryfall-seed
+match = catalog.search_records(embedding, top_k=1)[0]
+print(match["card_id"], match["metadata"])
 ```
 
-That command is a preflight and does not download images or run inference.
-Matching front and `_back` rows reuse the pinned Milo Catalog v1 embeddings.
-Review its staleness and cache coverage counts, then repeat it with `--build`
-and an explicit `--max-downloads` no lower than the reported requirement. The
-seed builder reads the existing sharded `scryfall/images/png/front|back` cache,
-refreshes stale files with bounded concurrency, and writes downloads back
-atomically.
+Omit `include_metadata=True` for the smallest recognition-only download.
 
-The eight existing TCGplayer catalogs can be migrated separately while reusing
-legacy Milo embeddings for existing product images:
+</details>
 
-```bash
-COLLECTORVISION_PROVIDER=cpu python scripts/seed_tcgplayer.py \
-  --version "$VERSION" \
-  --expected-source-revisions source-status.json \
-  --cache-root /path/to/ccg_card_id/catalog \
-  --legacy-dir /path/to/ccg_card_id/catalog/tcgplayer/collectorvision \
-  --output-dir tcgplayer-seed
+<details>
+<summary><strong>JavaScript example</strong></summary>
+
+```javascript
+import {
+  BrowserCatalogV2,
+} from "https://hanclinto.github.io/CollectorVision/lib/collectorvision-catalog-v2.mjs";
+
+const catalog = await BrowserCatalogV2.forGame("mtg", {
+  includeMetadata: true,
+});
+
+const [match] = catalog.searchRecords(queryEmbedding, 1);
+console.log(match.card_id, match.metadata);
 ```
 
-This is also a preflight by default. New products and additional faces are
-downloaded from the CDN and embedded only after `--build` and a reviewed
-`--max-downloads` are supplied. Existing legacy product images remain untouched.
-After reviewing both preflights, repeat each command with `--build` and its
-reviewed `--max-downloads`, then assemble and publish:
+`queryEmbedding` is the normalized `Float32Array` produced by the Milo browser
+model.
 
-```bash
-python scripts/assemble_release.py assemble \
-  --input-dir scryfall-seed \
-  --input-dir tcgplayer-seed \
-  --output-dir release \
-  --version "$VERSION"
-gh release create "$VERSION" --prerelease --latest=false release/*
-```
+</details>
 
-The assembler validates every manifest and asset before atomically exposing
-`release/`. The flat release contains one combined index, each catalog manifest,
-full recognition snapshots, optional full metadata, updater state, a bounded
-base-plus-delta discovery feed, and merged quality and seed reports.
-Zero-operation deltas have no assets. The index verifies each manifest, and
-each manifest verifies its assets.
+## Catalog v1 or v2?
 
-The current discovery feed is also source-controlled at
-[`catalog-feed-v2.json`](catalog-feed-v2.json). Releases retain immutable feed
-snapshots, while the root copy advances after successful publication and is
-served with its referenced assets from CollectorVisionCatalog Pages. It includes
-absolute download URLs, checksums, byte sizes, upstream freshness, and the last
-source-check time.
-It also rejects a beta tag whose date differs from the index's maximum upstream
-UTC update date. Expected revisions make a source change between status and
-fetch abort instead of publishing a misleading tag.
+| Catalog v1 | Catalog v2 |
+| --- | --- |
+| One convenient NPZ file | Compact FP16 recognition plus compressed JSONL |
+| Card IDs with minimal built-in data | Optional names, sets, languages, finishes, and other metadata |
+| Updates replace the whole file | Updates normally download only changed rows |
+| Great for custom-built catalogs | Great for hosted, bandwidth-conscious applications |
 
-Each later weekly beta also contains a complete snapshot plus a delta from
-exactly the preceding beta. Current clients may apply that one step; new or
-stale clients download the full snapshot and never assemble delta chains.
+Catalog v1 remains supported and is often the simplest choice when building and
+distributing your own catalog. Catalog v2 is designed for applications that
+want smaller downloads, richer optional data, browser-friendly files, and
+incremental updates.
 
-See [the Catalog v2 protocol](docs/catalog-v2.md) for the artifact and update
-design.
-
-## Local image-quality OCR
-
-On macOS, compile the thin Apple Vision wrapper once and stream image paths
-through it. Output is JSONL so audits can retain text evidence without coupling
-CI to a macOS-only backend:
-
-```bash
-swiftc -O scripts/apple_vision_ocr.swift -o /tmp/collectorvision-apple-ocr
-find /path/to/images -type f -name '*.jpg' |
-  /tmp/collectorvision-apple-ocr --stdin |
-  gzip -1 > apple-vision-ocr.jsonl.gz
-```
+Contributor setup and architecture are documented in
+[DEVELOPMENT.md](DEVELOPMENT.md).
