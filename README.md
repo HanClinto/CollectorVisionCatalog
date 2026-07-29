@@ -119,7 +119,8 @@ each manifest verifies its assets.
 
 The current discovery feed is also source-controlled at
 [`catalog-feed-v2.json`](catalog-feed-v2.json). Releases retain immutable feed
-snapshots, while the root copy advances after successful publication.
+snapshots, while the root copy advances after successful publication and is
+served with its referenced assets from CollectorVisionCatalog Pages.
 It also rejects a beta tag whose date differs from the index's maximum upstream
 UTC update date. Expected revisions make a source change between status and
 fetch abort instead of publishing a misleading tag.

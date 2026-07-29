@@ -43,9 +43,15 @@ the build date. The index contains that maximum timestamp once; individual
 source provenance remains in each manifest for builders and audits.
 
 Each release also contains an immutable `catalog-feed-v2.json` snapshot. The
-canonical moving copy is committed at the repository root and mirrored to Pages
-for normal clients. For each catalog, the feed names one complete base manifest
-and an ordered list of exact-base delta manifests:
+canonical moving copy is committed at the repository root and published from
+CollectorVisionCatalog Pages for normal clients:
+
+```text
+https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-feed-v2.json
+```
+
+For each catalog, the feed names one complete base manifest and an ordered list
+of exact-base delta manifests:
 
 ```json
 {

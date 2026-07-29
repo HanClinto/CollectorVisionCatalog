@@ -1,0 +1,92 @@
+name: Deploy Catalog Pages
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/deploy-pages.yml"
+      - "catalog-feed-v2.json"
+  schedule:
+    - cron: "47 11 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: catalog-pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Assemble catalog mirror
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          root="site/catalog-v2"
+          mkdir -p "$root"
+          cp catalog-feed-v2.json "$root/catalog-feed-v2.json"
+
+          declare -A roles
+          while IFS=$'\t' read -r version role; do
+            existing="${roles[$version]:-}"
+            if [ -n "$existing" ] && [ "$existing" != "$role" ]; then
+              roles[$version]="both"
+            else
+              roles[$version]="$role"
+            fi
+          done < <(python - <<'PY'
+          import json
+
+          with open("catalog-feed-v2.json") as stream:
+              feed = json.load(stream)
+          for entry in feed["catalogs"].values():
+              print(entry["base"]["version"], "full", sep="\t")
+              for delta in entry["deltas"]:
+                  print(delta["to"], "delta", sep="\t")
+          PY
+          )
+
+          for version in "${!roles[@]}"; do
+            role="${roles[$version]}"
+            destination="$root/$version"
+            mkdir -p "$destination"
+            gh release download "$version" \
+              --repo "$GITHUB_REPOSITORY" \
+              --pattern "catalog-index-v2.json" \
+              --pattern "*.manifest.json" \
+              --dir "$destination"
+            if [ "$role" = "full" ] || [ "$role" = "both" ]; then
+              gh release download "$version" \
+                --repo "$GITHUB_REPOSITORY" \
+                --pattern "*.recognition.*.gz" \
+                --pattern "*.metadata.jsonl.gz" \
+                --dir "$destination"
+            fi
+            if [ "$role" = "delta" ] || [ "$role" = "both" ]; then
+              gh release download "$version" \
+                --repo "$GITHUB_REPOSITORY" \
+                --pattern "*.delta.*.gz" \
+                --dir "$destination"
+            fi
+          done
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
