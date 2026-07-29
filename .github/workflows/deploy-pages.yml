@@ -7,6 +7,7 @@ on:
     paths:
       - ".github/workflows/deploy-pages.yml"
       - "catalog-feed-v2.json"
+      - "catalog-publication-v2.json"
   schedule:
     - cron: "47 11 * * *"
   workflow_dispatch:
@@ -36,32 +37,43 @@ jobs:
           root="site/catalog-v2"
           mkdir -p "$root"
           cp catalog-feed-v2.json "$root/catalog-feed-v2.json"
+          cp catalog-publication-v2.json "$root/catalog-publication-v2.json"
+          mkdir -p release-assets
 
-          while IFS=$'\t' read -r version filename; do
-            destination="$root/$version"
+          while IFS= read -r release; do
+            destination="release-assets/$release"
             mkdir -p "$destination"
-            gh release download "$version" \
+            gh release download "$release" \
               --repo "$GITHUB_REPOSITORY" \
-              --pattern "$filename" \
               --dir "$destination"
           done < <(python - <<'PY'
           import json
-          from urllib.parse import unquote, urlparse
 
-          with open("catalog-feed-v2.json") as stream:
-              feed = json.load(stream)
-          files = set()
-          for entry in feed["catalogs"].values():
-              for stage in [entry["base"], *entry["deltas"]]:
-                  version = stage.get("version", stage.get("to"))
-                  references = [stage["manifest"], *stage["assets"].values()]
-                  for reference in references:
-                      filename = unquote(urlparse(reference["url"]).path).rsplit("/", 1)[-1]
-                      files.add((version, filename))
-          for version, filename in sorted(files):
-              print(version, filename, sep="\t")
+          with open("catalog-publication-v2.json") as stream:
+              publication = json.load(stream)
+          for release in publication["releases"]:
+              print(release)
           PY
           )
+
+          ROOT="$root" python - <<'PY'
+          import os
+          from pathlib import Path
+
+          root = Path(os.environ["ROOT"])
+          for source in Path("release-assets").glob("*/*"):
+              public_name, version, relative = source.name.split(".", 2)
+              version_number = version.removeprefix("v")
+              if relative.startswith(("base.", "delta-from-")):
+                  parent, relative = relative.split(".", 1)
+                  destination = (
+                      root / public_name / "version" / version_number / parent / relative
+                  )
+              else:
+                  destination = root / public_name / "version" / version_number / relative
+              destination.parent.mkdir(parents=True, exist_ok=True)
+              source.rename(destination)
+          PY
 
       - uses: actions/configure-pages@v5
         with:

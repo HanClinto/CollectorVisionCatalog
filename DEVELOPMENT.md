@@ -9,13 +9,12 @@ The source adapters, deterministic FP16/JSONL artifact builder, exact
 predecessor deltas, historical Scryfall replay, and immutable version staging
 are implemented.
 
-The current clients and base feed exercise the earlier beta layout. The
-remaining Catalog v2 cutover work is:
+The catalog-local feed, immutable public manifests, and catalog-first Pages
+layout are implemented. The remaining Catalog v2 cutover work is:
 
 1. Assign catalog-local versions in the updater and skip unchanged catalogs.
-2. Replace the beta feed with catalog-local base and delta routes.
-3. Publish catalog-first paths through Pages.
-4. Adapt the existing CollectorVision Python and browser consumers to the
+2. Restore scheduled publication after the updater uses the active contract.
+3. Adapt the existing CollectorVision Python and browser consumers to the
    catalog-local contract.
 
 Catalog v2 is unreleased, so discarded prototypes do not require compatibility
@@ -39,10 +38,10 @@ ruff check .
 - [`config/source-quality-overrides.json`](config/source-quality-overrides.json)
   contains reviewed source-image exclusions.
 
-The scheduled producer is
-[`.github/workflows/weekly-release.yml`](.github/workflows/weekly-release.yml).
-It runs Mondays at 10:17 UTC. Pages deployment is assembled by
+Pages deployment is assembled by
 [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml).
+The earlier beta producer was removed so that it cannot overwrite the active
+feed while catalog-local update publication is being integrated.
 
 ## Historical Scryfall replay
 

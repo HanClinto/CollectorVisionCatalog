@@ -79,18 +79,14 @@ def test_assembles_seed_release_atomically_and_preserves_summaries(workspace: Pa
     assert sorted(quality["catalogs"]) == sorted(assembled.catalogs)
 
 
-def test_release_rejects_incorrect_feed_manifest_size(workspace: Path) -> None:
+def test_internal_release_does_not_emit_public_feed(workspace: Path) -> None:
     seed = workspace / "seed"
     _seed(seed, "demo/catalog")
     output = workspace / "release"
     assemble_seed_release([seed], output, VERSION)
-    feed_path = output / "catalog-feed-v2.json"
-    payload = json.loads(feed_path.read_text())
-    payload["catalogs"]["demo/catalog"]["base"]["manifest"]["size"] += 1
-    feed_path.write_text(json.dumps(payload))
 
-    with pytest.raises(ValidationError, match="reference does not match index"):
-        validate_release(output)
+    assert not (output / "catalog-feed-v2.json").exists()
+    validate_release(output)
 
 
 def test_assembly_rejects_existing_output_duplicate_key_and_version(workspace: Path) -> None:

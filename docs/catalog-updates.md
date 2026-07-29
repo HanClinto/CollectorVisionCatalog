@@ -156,8 +156,9 @@ replace the working local catalog. A later online load can retry the update.
 
 ## Update schedule
 
-The service checks upstream sources weekly, normally on **Monday at 10:17
-UTC**. GitHub Actions may begin slightly after the scheduled time.
+During the Catalog v2 beta, upstream refreshes are published manually while the
+catalog-local producer is integrated. The intended production schedule is a
+weekly check, normally on **Monday at 10:17 UTC**.
 
 A source check does not automatically create a version. A catalog advances only
 when its effective recognition data, identifiers, or metadata have changed.

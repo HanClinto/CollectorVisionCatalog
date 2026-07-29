@@ -13,7 +13,6 @@ from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, BinaryIO
 from urllib.error import HTTPError, URLError
@@ -31,18 +30,12 @@ from collectorvision_catalog import (
     ValidationError,
     build_catalog,
     load_catalog_build,
-    load_catalog_feed,
-    load_catalog_index,
-    load_manifest,
     manifest_filename_for_catalog,
     normalize_rfc3339_utc,
-    update_catalog_feed,
     validate_artifacts,
-    write_catalog_feed,
     write_catalog_index,
 )
 from collectorvision_catalog.artifacts import Embedder, ImageLoader, default_image_loader
-from collectorvision_catalog.feed import FEED_FILENAME
 from collectorvision_catalog.quality import apply_quality_rules, load_quality_rules
 from collectorvision_catalog.sources.scryfall import normalize_scryfall_card
 from collectorvision_catalog.sources.snapshots import SourceSnapshot
@@ -461,7 +454,6 @@ def build_enabled_catalogs(
     batch_size: int = 16,
     source_rows_factory: Callable[[dict[str, Any]], list[RecognitionRow]] | None = None,
     expected_source_revisions: Mapping[str, SourceRevision] | None = None,
-    checked_at: str | None = None,
     scryfall_source_override: Mapping[str, Any] | None = None,
     embedder_factory: Callable[[str, int], Embedder] | None = None,
     image_loader: ImageLoader | None = None,
@@ -476,9 +468,6 @@ def build_enabled_catalogs(
     quality_reports: dict[str, Any] = {}
     quality_rules = load_quality_rules(quality_overrides_path)
     expected_source_revisions = expected_source_revisions or {}
-    checked_at = checked_at or datetime.now(timezone.utc).isoformat(timespec="seconds").replace(
-        "+00:00", "Z"
-    )
     snapshots: dict[str, SourceSnapshot[RecognitionRow]] = {}
     if source_rows_factory is not None:
         for config in configs:
@@ -717,29 +706,6 @@ def build_enabled_catalogs(
 
     index_path = output_dir / "catalog-index-v2.json"
     index = write_catalog_index(index_path, version, manifests)
-    previous_index_path = previous_dir / "catalog-index-v2.json"
-    previous_feed_path = previous_dir / FEED_FILENAME
-    previous_index = (
-        load_catalog_index(previous_index_path) if previous_index_path.is_file() else None
-    )
-    feed = update_catalog_feed(
-        current_index=index,
-        current_manifests={key: load_manifest(path) for key, path in manifests.items()},
-        checked_at=checked_at,
-        previous_index=previous_index,
-        previous_manifests=(
-            {
-                key: load_manifest(previous_dir / entry.manifest_filename)
-                for key, entry in previous_index.catalogs.items()
-            }
-            if previous_index is not None
-            else None
-        ),
-        previous_feed=(
-            load_catalog_feed(previous_feed_path) if previous_feed_path.is_file() else None
-        ),
-    )
-    write_catalog_feed(output_dir / FEED_FILENAME, feed)
     summary = {
         "version": version,
         "source_updated_at": index.source_updated_at,
@@ -1210,7 +1176,6 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     scryfall_source_override = _scryfall_source_override(args)
     expected_revisions: dict[str, SourceRevision] = {}
-    checked_at = None
     if args.expected_source_revisions is not None:
         payload = json.loads(args.expected_source_revisions.read_text(encoding="utf-8"))
         checked_at = payload.get("checked_at")
@@ -1238,7 +1203,6 @@ def main(argv: Sequence[str] | None = None) -> int:
         cache_root=args.cache_root,
         batch_size=args.batch_size,
         expected_source_revisions=expected_revisions,
-        checked_at=checked_at,
         scryfall_source_override=scryfall_source_override,
     )
     print(json.dumps(summary, indent=2, sort_keys=True))
