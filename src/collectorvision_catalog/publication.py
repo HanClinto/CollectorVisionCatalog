@@ -14,7 +14,6 @@ from .artifacts import (
     CatalogDescriptor,
     SourceRevision,
     ValidationError,
-    _canonical_json_bytes,
     _require_mapping,
     _require_non_empty_string,
     _requires_delta_upsert,
@@ -329,7 +328,10 @@ def publish_catalog_version(
             ),
         )
         manifest = CatalogVersionManifest.from_dict(manifest.to_dict())
-        (staging_dir / "manifest.json").write_bytes(_canonical_json_bytes(manifest.to_dict()))
+        (staging_dir / "manifest.json").write_text(
+            json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
         staging_dir.replace(version_dir)
     except BaseException:
         if staging_dir.exists():

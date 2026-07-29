@@ -161,4 +161,5 @@ def test_deterministic_serialization_round_trip(workspace: Path) -> None:
     write_catalog_feed(second, load_catalog_feed(first))
 
     assert first.read_bytes() == second.read_bytes()
+    assert first.read_text().startswith('{\n  "catalogs":')
     assert load_catalog_feed(first) == feed

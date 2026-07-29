@@ -11,7 +11,6 @@ from urllib.parse import quote, unquote, urlparse
 
 from .artifacts import (
     ValidationError,
-    _canonical_json_bytes,
     _require_mapping,
     _require_non_empty_string,
     normalize_rfc3339_utc,
@@ -330,7 +329,10 @@ def update_catalog_feed(
 
 def write_catalog_feed(path: str | Path, feed: CatalogFeed) -> None:
     validated = CatalogFeed.from_dict(feed.to_dict())
-    Path(path).write_bytes(_canonical_json_bytes(validated.to_dict()))
+    Path(path).write_text(
+        json.dumps(validated.to_dict(), indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
 
 
 def load_catalog_feed(path: str | Path) -> CatalogFeed:
