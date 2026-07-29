@@ -314,6 +314,24 @@ function describeRecord(key, metadata) {
   };
 }
 
+function sourcePage(identifiers) {
+  if (identifiers?.scryfall_card) {
+    return {
+      label: "View on Scryfall",
+      url: `https://scryfall.com/card/${encodeURIComponent(identifiers.scryfall_card)}`,
+    };
+  }
+  if (identifiers?.tcgplayer_product) {
+    return {
+      label: "View on TCGplayer",
+      url: `https://www.tcgplayer.com/product/${encodeURIComponent(
+        identifiers.tcgplayer_product,
+      )}`,
+    };
+  }
+  return null;
+}
+
 async function analyzeUpdate(history, index) {
   const prior = await reconstructPriorState(history, index);
   const stage = history[index];
@@ -345,7 +363,9 @@ async function analyzeUpdate(history, index) {
       ...describeRecord(key, metadata),
       kinds: [kind],
       fields: [],
-      imageUrl: operation.state?.image_url,
+      identifiers: operation.record?.identifiers || previousRecord?.identifiers || {},
+      metadata,
+      metadataLabel: operation.op === "delete" ? "Previous metadata" : "Metadata",
     });
   }
   for (const operation of metadataOps) {
@@ -363,11 +383,17 @@ async function analyzeUpdate(history, index) {
         existing.kinds.push(kind);
         existing.fields = fields;
       }
+      existing.metadata = current || previous;
+      existing.metadataLabel =
+        operation.op === "delete" ? "Previous metadata" : "Metadata";
     } else {
       changes.set(operation.key, {
         ...describeRecord(operation.key, current || previous),
         kinds: [kind],
         fields,
+        identifiers: prior.identifiers.get(operation.key)?.identifiers || {},
+        metadata: current || previous,
+        metadataLabel: operation.op === "delete" ? "Previous metadata" : "Metadata",
       });
     }
   }
@@ -431,13 +457,30 @@ function renderAnalysis(target, analysis) {
   const renderPage = () => {
     const page = analysis.changes.slice(rendered, rendered + pageSize);
     for (const change of page) {
-      const row = element("div", "change-row");
+      const row = element("details", "change-row");
+      const rowSummary = element("summary", "change-summary");
       const description = element("div");
       description.append(
         element("div", "change-name", change.name),
         element("div", "change-context", change.context || change.key),
       );
+      rowSummary.append(
+        description,
+        element("span", "change-kind", change.kinds.join(" + ")),
+      );
+      const expanded = element("div", "card-details");
+      expanded.append(
+        detailSection("Identification", {
+          key: change.key,
+          ...change.identifiers,
+        }),
+      );
+      if (change.metadata) {
+        expanded.append(detailSection(change.metadataLabel, change.metadata));
+      }
       if (change.fields.length) {
+        const changed = element("section", "detail-section");
+        changed.append(element("h5", "", "Metadata changes"));
         const fields = element("div", "change-fields");
         for (const difference of change.fields) {
           fields.append(
@@ -448,31 +491,38 @@ function renderAnalysis(target, analysis) {
             ),
           );
         }
-        description.append(fields);
+        changed.append(fields);
+        expanded.append(changed);
       }
-      if (change.imageUrl && safeHttpUrl(change.imageUrl)) {
-        const imageLink = element("a", "image-link", "View current source image");
-        imageLink.href = change.imageUrl;
-        imageLink.target = "_blank";
-        imageLink.rel = "noreferrer";
-        description.append(imageLink);
+      const pageLink = sourcePage(change.identifiers);
+      if (pageLink) {
+        const link = element("a", "source-link", pageLink.label);
+        link.href = pageLink.url;
+        link.target = "_blank";
+        link.rel = "noreferrer";
+        expanded.append(link);
       }
-      row.append(description, element("span", "change-kind", change.kinds.join(" + ")));
+      row.append(rowSummary, expanded);
       section.append(row);
+    }
+
+    function detailSection(title, values) {
+      const section = element("section", "detail-section");
+      section.append(element("h5", "", title));
+      const list = element("dl", "detail-list");
+      for (const [name, value] of Object.entries(values)) {
+        const term = element("dt", "", name);
+        const definition = element("dd", "", displayValue(value));
+        list.append(term, definition);
+      }
+      section.append(list);
+      return section;
     }
 
     function displayValue(value) {
       if (value === undefined) return "not set";
       if (typeof value === "string") return value;
       return JSON.stringify(value);
-    }
-
-    function safeHttpUrl(value) {
-      try {
-        return ["http:", "https:"].includes(new URL(value).protocol);
-      } catch {
-        return false;
-      }
     }
     rendered += page.length;
     more.remove();
