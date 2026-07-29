@@ -33,17 +33,14 @@ https://github.com/HanClinto/CollectorVisionCatalog/releases/download/<tag>/cata
 ```
 
 The beta number increases monotonically. The index maps a stable key such as
-`milo1/scryfall/mtg` to that catalog's
-manifest and repeats its immutable descriptor: `game`, `source`, `profile`,
-`description`, `result_identifier`, and `recommended`. Clients discover
-profiles from descriptors, never by parsing catalog keys. Release assets are
-flat because GitHub Release assets do not have directories; filenames use a
-collision-free catalog slug.
+`milo1/scryfall/mtg` to a manifest filename and SHA-256 checksum. Catalog keys
+encode the model, source, and game; the index does not duplicate manifest
+metadata. Release assets are flat because GitHub Release assets do not have
+directories; filenames use a collision-free catalog slug.
 
 The date suffix is the UTC date of the index's maximum `source_updated_at`, not
-the build date. Each index entry and manifest contains the same immutable source
-revision (`type`, `name`, normalized `updated_at`, provenance URI, and identity).
-The index repeats the maximum timestamp at top level for release tooling.
+the build date. The index contains that maximum timestamp once; individual
+source provenance remains in each manifest for builders and audits.
 
 Hugging Face remains the Catalog v1 host during migration. Catalog v2 does not
 replace or mutate v1 manifests.
@@ -93,20 +90,13 @@ atomically. Sharding or range access should be added only after measured need.
 The FP16 matrix and recognition JSONL are the required client layer. Metadata
 is optional. Builder state is separate and clients must not download it.
 
-### Profiles
+### Catalog coverage
 
-Profiles are independent physical snapshots, not filters over one downloaded
-catalog. `cards` and `artworks` suit small/mobile clients and stream overlays.
-`printings` and `all-languages` suit marketplaces or workflows needing more
-edition/language candidates. The recommended Scryfall MTG `printings` profile
-uses `default_cards`; optional seed-required profiles use `oracle_cards`,
-`unique_artwork`, and `all_cards`. TCGplayer catalogs are `printings` profiles.
-Catalog coverage and model discrimination are separate: a larger profile does
-not promise accurate language or edition distinction.
-
-The compact Scryfall profiles are configured but disabled until each is
-separately seeded. The initial beta may contain only the recommended Scryfall
-and TCGplayer `printings` catalogs.
+Scryfall provides one default MTG recognition catalog using `default_cards`.
+It retains distinct artworks and printings. Promo, token, art-card, finish, and
+similar policies are lookup-time filters, not separate physical catalogs.
+Catalog coverage and model discrimination remain separate: including a
+printing does not promise accurate language or edition distinction.
 
 ### Optional metadata layer
 
@@ -165,10 +155,9 @@ rows in a compact FP16 delta matrix. Metadata has its own upsert/delete delta.
 A versioned client must apply a delta only when its installed version exactly equals
 `base_version`; otherwise it downloads the full snapshot.
 
-A seed manifest has `base_version: null`, zero recognition and metadata
-operations, and empty delta assets. A seed is installed from its full snapshot;
-`apply_delta(None, seed)` is invalid and does not pretend the empty delta can
-reconstruct that snapshot.
+A seed manifest has `base_version: null` and zero recognition and metadata
+operations. It has no delta assets. A seed is installed from its full snapshot;
+`apply_delta(None, seed)` is invalid.
 
 This deliberately avoids permanent delta chains. Weekly users get small
 updates, while stale clients have a simple and reliable recovery path.
@@ -210,17 +199,18 @@ gh release create "$VERSION" --prerelease --latest=false release/*
 ```
 
 The flat assembled release contains the combined index; all catalog manifests;
-full recognition, metadata, and updater-state assets; empty seed delta assets;
-merged quality and seed summaries; and deterministic `SHA256SUMS`. Each input
-summary is retained with the catalog keys contributed by that input.
+full recognition, metadata, and updater-state assets; and merged quality and
+seed summaries. Delta assets are present only when they contain operations or
+embeddings. Each input summary retains the catalog keys contributed by that
+input.
 Assembly verifies the beta suffix against the combined index timestamp.
 
 After `update_catalogs.py`, the weekly producer validates the full snapshot and
-its exact-one-step deltas and refreshes checksums before upload:
+its exact-one-step deltas before upload:
 
 ```bash
 python scripts/assemble_release.py validate \
-  --release-dir release --version "$VERSION" --write-checksums
+  --release-dir release --version "$VERSION"
 ```
 
 ## Build algorithm

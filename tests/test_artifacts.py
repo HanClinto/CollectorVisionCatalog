@@ -30,7 +30,7 @@ from collectorvision_catalog import (
     manifest_filename_for_catalog,
     validate_artifacts,
 )
-from collectorvision_catalog.artifacts import AssetInfo
+from collectorvision_catalog.artifacts import AssetInfo, CatalogManifest
 
 CATALOG_KEY = "milo1/scryfall/mtg"
 EMBEDDING_MODEL = "milo1"
@@ -168,9 +168,6 @@ def test_build_outputs_are_deterministic_and_loadable(workspace: Path) -> None:
     recognition_records = _read_gzip_jsonl(
         workspace / "build-a" / build_a.manifest.assets["recognition_rows"].filename
     )
-    delta_records = _read_gzip_jsonl(
-        workspace / "build-a" / build_a.manifest.assets["delta_operations"].filename
-    )
 
     assert build_a.manifest.to_dict() == build_b.manifest.to_dict()
     assert loaded.manifest.catalog_key == CATALOG_KEY
@@ -185,12 +182,14 @@ def test_build_outputs_are_deterministic_and_loadable(workspace: Path) -> None:
     )
     assert len(delta.operations) == 0
     assert delta.embeddings.shape == (0, 4)
+    assert "delta_operations" not in build_a.manifest.assets
+    assert "delta_matrix" not in build_a.manifest.assets
+    assert "metadata_delta" not in build_a.manifest.assets
     assert loaded.rows[0].metadata == {"name": "Alpha"}
     assert all(
         "image_url" not in record and "image_fingerprint" not in record
         for record in recognition_records
     )
-    assert delta_records == []
 
 
 def test_reuses_previous_embeddings_on_metadata_only_change(workspace: Path) -> None:
@@ -277,6 +276,29 @@ def test_seed_embeddings_reuse_initial_rows_and_keep_artifacts_valid(workspace: 
         _normalized_embedding_for_color(image_map["memory://alpha"]),
         atol=1e-3,
     )
+
+
+def test_legacy_empty_delta_assets_remain_readable(workspace: Path) -> None:
+    build = build_catalog(
+        [make_row("alpha", "memory://alpha", "fp-alpha")],
+        embedder=TrackingEmbedder(),
+        image_loader=TrackingImageLoader({"memory://alpha": (255, 0, 0)}),
+        output_dir=workspace / "legacy",
+        catalog_key=CATALOG_KEY,
+        version="v1",
+        embedding_model=EMBEDDING_MODEL,
+    )
+    payload = build.manifest.to_dict()
+    placeholder = payload["assets"]["recognition_rows"]
+    payload["assets"].update(
+        {
+            "delta_operations": placeholder,
+            "delta_matrix": placeholder,
+            "metadata_delta": placeholder,
+        }
+    )
+
+    assert CatalogManifest.from_dict(payload).delta.operations == 0
 
 
 def test_identifiers_serialize_and_result_identifier_is_required(workspace: Path) -> None:

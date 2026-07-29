@@ -72,26 +72,14 @@ def test_load_config_rejects_duplicate_keys(tmp_path: Path) -> None:
         updater.load_config(path)
 
 
-def test_repository_config_exposes_independent_profiles() -> None:
+def test_repository_config_exposes_one_default_scryfall_catalog() -> None:
     configs = updater.load_config(Path("config/catalogs.json"))
     scryfall = [item for item in configs if item.descriptor.source == "scryfall"]
-    assert {item.descriptor.profile for item in scryfall} == {
-        "printings",
-        "cards",
-        "artworks",
-        "all-languages",
-    }
-    assert sum(item.descriptor.recommended for item in scryfall) == 1
-    assert all(item.seed_required for item in scryfall)
-    cards = next(item for item in scryfall if item.descriptor.profile == "cards")
-    assert cards.enabled
-    assert cards.seed_from_catalog == "milo1/scryfall/mtg"
-    assert cards.max_seed_inference_rows == 100
-    assert all(
-        not item.enabled
-        for item in scryfall
-        if item.descriptor.profile not in {"printings", "cards"}
-    )
+    assert len(scryfall) == 1
+    assert scryfall[0].key == "milo1/scryfall/mtg"
+    assert scryfall[0].descriptor.profile == "default"
+    assert scryfall[0].enabled
+    assert scryfall[0].seed_required
 
 
 def test_scryfall_revision_is_extracted_from_selected_bulk_entry(monkeypatch) -> None:
@@ -347,7 +335,7 @@ def test_build_requires_seed_unless_full_rebuild_is_explicit(tmp_path: Path) -> 
         )
 
 
-def test_new_subset_catalog_reuses_seed_and_bounds_missing_embeddings(
+def test_descriptor_label_change_reuses_embeddings_and_starts_fresh_snapshot(
     tmp_path: Path,
 ) -> None:
     previous_dir = tmp_path / "previous"
@@ -387,22 +375,13 @@ def test_new_subset_catalog_reuses_seed_and_bounds_missing_embeddings(
 
     target = json.loads(seed_config.read_text(encoding="utf-8"))
     catalog = target["catalogs"][0]
-    catalog["key"] = "milo1/scryfall/mtg-cards"
-    catalog["descriptor"]["profile"] = "cards"
-    catalog["descriptor"]["recommended"] = False
-    catalog["source"]["bulk_type"] = "oracle_cards"
-    catalog["seed_from_catalog"] = "milo1/scryfall/mtg"
-    catalog["max_seed_inference_rows"] = 1
+    catalog["descriptor"]["profile"] = "default"
     target_config = tmp_path / "target-config.json"
     target_config.write_text(json.dumps(target), encoding="utf-8")
-    missing_row = replace(
-        row,
-        key="scryfall:cb000000-0000-0000-0000-000000000001:face:0",
-        identifiers={
-            **row.identifiers,
-            "scryfall_card": "cb000000-0000-0000-0000-000000000001",
-        },
-        image_url="memory://missing",
+    changed_row = replace(
+        extra_seed_row,
+        image_fingerprint="fp-changed",
+        image_url="memory://changed",
     )
 
     output_dir = tmp_path / "release"
@@ -411,7 +390,7 @@ def test_new_subset_catalog_reuses_seed_and_bounds_missing_embeddings(
         previous_dir=previous_dir,
         output_dir=output_dir,
         version="catalog-v2-beta.2-2026-07-18",
-        source_rows_factory=lambda source: [row, missing_row],
+        source_rows_factory=lambda source: [row, changed_row],
         embedder_factory=lambda model, batch: lambda images: np.array(
             [[0.0, 1.0]], dtype=np.float32
         ),
@@ -419,7 +398,7 @@ def test_new_subset_catalog_reuses_seed_and_bounds_missing_embeddings(
     )
 
     build = updater.load_catalog_build(
-        output_dir / "milo1--scryfall--mtg-cards.manifest.json",
+        output_dir / "milo1--scryfall--mtg.manifest.json",
         asset_dir=output_dir,
     )
     assert summary["catalogs"][0]["seed_embeddings_reused"] == 1
@@ -429,28 +408,6 @@ def test_new_subset_catalog_reuses_seed_and_bounds_missing_embeddings(
         build.embeddings,
         np.array([[0.6, 0.8], [0.0, 1.0]], dtype=np.float16),
     )
-
-
-def test_subset_seed_requires_source_catalog_in_previous_release(tmp_path: Path) -> None:
-    config_path = tmp_path / "catalogs.json"
-    make_config(config_path)
-    payload = json.loads(config_path.read_text(encoding="utf-8"))
-    payload["catalogs"][0]["key"] = "milo1/scryfall/mtg-cards"
-    payload["catalogs"][0]["seed_from_catalog"] = "milo1/scryfall/mtg"
-    config_path.write_text(json.dumps(payload), encoding="utf-8")
-
-    with pytest.raises(ValidationError, match="requires seed catalog"):
-        updater.build_enabled_catalogs(
-            config_path=config_path,
-            previous_dir=tmp_path / "previous",
-            output_dir=tmp_path / "release",
-            version="catalog-v2-beta.2-2026-07-18",
-            source_rows_factory=lambda source: [make_row()],
-            embedder_factory=lambda model, batch: lambda images: np.array([[1.0, 0.0]]),
-            image_loader=lambda url: Image.new("RGB", (2, 2)),
-        )
-
-
 def test_full_build_writes_release_index_and_summary(tmp_path: Path) -> None:
     config_path = tmp_path / "catalogs.json"
     make_config(config_path)

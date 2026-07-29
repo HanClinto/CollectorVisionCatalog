@@ -6,7 +6,7 @@
       "descriptor": {
         "game": "magic-the-gathering",
         "source": "scryfall",
-        "profile": "printings",
+        "profile": "default",
         "description": "English-first paper printings from Scryfall default cards.",
         "result_identifier": "scryfall_card",
         "recommended": true
@@ -19,53 +19,6 @@
       "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
       "max_changed_rows": 5000,
       "enabled": true,
-      "seed_required": true
-    },
-    {
-      "key": "milo1/scryfall/mtg-cards",
-      "descriptor": {
-        "game": "magic-the-gathering",
-        "source": "scryfall",
-        "profile": "cards",
-        "description": "One representative printing per Oracle card for lightweight recognition.",
-        "result_identifier": "scryfall_card"
-      },
-      "source": {"type": "scryfall", "bulk_type": "oracle_cards", "paper_only": true},
-      "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
-      "max_changed_rows": 5000,
-      "enabled": true,
-      "seed_required": true,
-      "seed_from_catalog": "milo1/scryfall/mtg",
-      "max_seed_inference_rows": 100
-    },
-    {
-      "key": "milo1/scryfall/mtg-artworks",
-      "descriptor": {
-        "game": "magic-the-gathering",
-        "source": "scryfall",
-        "profile": "artworks",
-        "description": "One representative printing per unique Scryfall artwork.",
-        "result_identifier": "scryfall_card"
-      },
-      "source": {"type": "scryfall", "bulk_type": "unique_artwork", "paper_only": true},
-      "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
-      "max_changed_rows": 5000,
-      "enabled": false,
-      "seed_required": true
-    },
-    {
-      "key": "milo1/scryfall/mtg-all-languages",
-      "descriptor": {
-        "game": "magic-the-gathering",
-        "source": "scryfall",
-        "profile": "all-languages",
-        "description": "All paper printings and languages from Scryfall.",
-        "result_identifier": "scryfall_card"
-      },
-      "source": {"type": "scryfall", "bulk_type": "all_cards", "paper_only": true},
-      "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
-      "max_changed_rows": 5000,
-      "enabled": false,
       "seed_required": true
     },
     {

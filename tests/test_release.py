@@ -178,8 +178,10 @@ def test_checksums_are_deterministic_and_existing_release_is_validated(workspace
     output = workspace / "release"
     assemble_seed_release([seed], output, VERSION)
     checksums = output / "SHA256SUMS"
-    original = checksums.read_bytes()
+    assert not checksums.exists()
 
+    write_checksums(output)
+    original = checksums.read_bytes()
     write_checksums(output)
     assert checksums.read_bytes() == original
     lines = original.decode().splitlines()
@@ -218,7 +220,7 @@ def test_cli_assembles_and_validates_release(workspace: Path) -> None:
         == 0
     )
     checksum_path = output / "SHA256SUMS"
-    original_checksums = checksum_path.read_bytes()
+    assert not checksum_path.exists()
     with pytest.raises(ValidationError, match="does not match expected"):
         ASSEMBLE_RELEASE.main(
             [
@@ -227,10 +229,9 @@ def test_cli_assembles_and_validates_release(workspace: Path) -> None:
                 str(output),
                 "--version",
                 "wrong-version",
-                "--write-checksums",
             ]
         )
-    assert checksum_path.read_bytes() == original_checksums
+    assert not checksum_path.exists()
     assert (
         ASSEMBLE_RELEASE.main(
             [
@@ -244,6 +245,7 @@ def test_cli_assembles_and_validates_release(workspace: Path) -> None:
         )
         == 0
     )
+    assert checksum_path.is_file()
 
 
 def test_beta_release_date_must_match_latest_source_date(workspace: Path) -> None:
@@ -253,14 +255,25 @@ def test_beta_release_date_must_match_latest_source_date(workspace: Path) -> Non
         validate_release(seed)
 
 
-def test_release_rejects_index_source_revision_tampering(workspace: Path) -> None:
+def test_release_index_contains_only_manifest_discovery_fields(workspace: Path) -> None:
     seed = workspace / "seed"
     _seed(seed, "demo/catalog")
     index_path = seed / "catalog-index-v2.json"
     payload = json.loads(index_path.read_text())
-    payload["catalogs"]["demo/catalog"]["source_revision"]["identity"] = "tampered"
+    assert set(payload["catalogs"]["demo/catalog"]) == {
+        "manifest_filename",
+        "sha256",
+    }
+
+
+def test_release_rejects_incorrect_top_level_source_timestamp(workspace: Path) -> None:
+    seed = workspace / "seed"
+    _seed(seed, "demo/catalog")
+    index_path = seed / "catalog-index-v2.json"
+    payload = json.loads(index_path.read_text())
+    payload["source_updated_at"] = "2026-07-24T23:59:59Z"
     index_path.write_text(json.dumps(payload))
-    with pytest.raises(ValidationError, match="source revision"):
+    with pytest.raises(ValidationError, match="maximum manifest source timestamp"):
         validate_release(seed)
 
 

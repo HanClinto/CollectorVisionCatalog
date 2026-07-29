@@ -24,9 +24,6 @@ _REQUIRED_ASSET_NAMES = {
     "recognition_rows",
     "metadata_rows",
     "state_rows",
-    "delta_matrix",
-    "delta_operations",
-    "metadata_delta",
 }
 
 
@@ -437,6 +434,12 @@ class CatalogManifest:
         missing_assets = _REQUIRED_ASSET_NAMES.difference(assets)
         if missing_assets:
             raise ValidationError(f"manifest is missing required assets: {sorted(missing_assets)}")
+        if delta.operations and "delta_operations" not in assets:
+            raise ValidationError("manifest with recognition delta operations needs an asset")
+        if "delta_matrix" in assets and "delta_operations" not in assets:
+            raise ValidationError("delta matrix requires recognition delta operations")
+        if delta.metadata_operations and "metadata_delta" not in assets:
+            raise ValidationError("manifest with metadata delta operations needs an asset")
         return cls(
             schema_version=schema_version,
             catalog_key=_require_non_empty_string(payload.get("catalog_key"), "catalog_key"),
@@ -694,7 +697,11 @@ def load_delta_bundle(
 ) -> DeltaBundle:
     manifest = load_manifest(manifest_path)
     asset_root = Path(asset_dir) if asset_dir is not None else Path(manifest_path).resolve().parent
-    operation_payloads = _load_jsonl_asset(manifest, asset_root, "delta_operations")
+    operation_payloads = (
+        _load_jsonl_asset(manifest, asset_root, "delta_operations")
+        if manifest.delta.operations
+        else []
+    )
     operations: list[DeltaOperation] = []
     seen_keys: set[str] = set()
     upsert_count = 0
@@ -721,19 +728,25 @@ def load_delta_bundle(
         seen_keys.add(row.key)
         operations.append(DeltaUpsert(row=row, embedding_index=embedding_index))
         upsert_count += 1
-    embeddings = _load_embedding_asset(
-        manifest,
-        asset_root,
-        asset_name="delta_matrix",
-        expected_rows=upsert_count,
+    embeddings = (
+        _load_embedding_asset(
+            manifest,
+            asset_root,
+            asset_name="delta_matrix",
+            expected_rows=upsert_count,
+        )
+        if upsert_count
+        else np.empty((0, manifest.dim), dtype=np.float16)
     )
     if embeddings.shape != (upsert_count, manifest.dim):
         raise ValidationError(
             "delta embedding matrix shape "
             f"{embeddings.shape} does not match ({upsert_count}, {manifest.dim})"
         )
-    metadata_operations = _load_metadata_delta(
-        _load_jsonl_asset(manifest, asset_root, "metadata_delta")
+    metadata_operations = (
+        _load_metadata_delta(_load_jsonl_asset(manifest, asset_root, "metadata_delta"))
+        if manifest.delta.metadata_operations
+        else []
     )
     if len(operations) != manifest.delta.operations:
         raise ValidationError(
@@ -1126,7 +1139,7 @@ def _build_asset_payloads(
     delta_embeddings: NDArray[np.float16],
     metadata_operations: Sequence[dict[str, Any]],
 ) -> dict[str, tuple[str, str, bytes]]:
-    return {
+    assets = {
         "recognition_matrix": (
             f"{catalog_slug}.recognition.f16.gz",
             "application/octet-stream",
@@ -1147,22 +1160,26 @@ def _build_asset_payloads(
             "application/x-ndjson",
             _gzip_bytes(_jsonl_bytes(row.state_record().to_dict() for row in rows)),
         ),
-        "delta_matrix": (
-            f"{catalog_slug}.delta.f16.gz",
-            "application/octet-stream",
-            _gzip_bytes(_embedding_bytes(delta_embeddings)),
-        ),
-        "delta_operations": (
+    }
+    if delta_operations:
+        assets["delta_operations"] = (
             f"{catalog_slug}.delta.jsonl.gz",
             "application/x-ndjson",
             _gzip_bytes(_jsonl_bytes(delta_operations)),
-        ),
-        "metadata_delta": (
+        )
+    if len(delta_embeddings):
+        assets["delta_matrix"] = (
+            f"{catalog_slug}.delta.f16.gz",
+            "application/octet-stream",
+            _gzip_bytes(_embedding_bytes(delta_embeddings)),
+        )
+    if metadata_operations:
+        assets["metadata_delta"] = (
             f"{catalog_slug}.metadata.delta.jsonl.gz",
             "application/x-ndjson",
             _gzip_bytes(_jsonl_bytes(metadata_operations)),
-        ),
-    }
+        )
+    return assets
 
 
 def _embedding_bytes(embeddings: NDArray[np.float16]) -> bytes:

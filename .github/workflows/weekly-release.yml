@@ -142,8 +142,7 @@ jobs:
         run: |
           python scripts/assemble_release.py validate \
             --release-dir release \
-            --version "${{ steps.release.outputs.version }}" \
-            --write-checksums
+            --version "${{ steps.release.outputs.version }}"
 
       - name: Publish immutable release
         if: steps.changes.outputs.changed == 'true'

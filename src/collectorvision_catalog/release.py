@@ -49,6 +49,7 @@ def assemble_seed_release(
     source_files: dict[str, Path] = {}
     quality_catalogs: dict[str, Any] = {}
     summaries: list[dict[str, Any]] = []
+    source_revisions = []
     for source in sources:
         index, manifests = _validate_indexed_release(source, expected_version=version)
         _verify_checksums_if_present(source)
@@ -79,6 +80,7 @@ def assemble_seed_release(
             entries[catalog_key] = entry
             quality_catalogs[catalog_key] = quality_entries[catalog_key]
             manifest_path, manifest = manifests[catalog_key]
+            source_revisions.append(manifest.source_revision)
             _claim_file(source_files, entry.manifest_filename, manifest_path)
             for asset in manifest.assets.values():
                 _claim_file(source_files, asset.filename, source / asset.filename)
@@ -87,9 +89,7 @@ def assemble_seed_release(
     combined_index = CatalogIndex(
         schema_version=2,
         release_version=version,
-        source_updated_at=max_source_updated_at(
-            entry.source_revision for entry in entries.values()
-        ),
+        source_updated_at=max_source_updated_at(source_revisions),
         catalogs=entries,
     )
     _validate_beta_version_date(version, combined_index.source_updated_at)
@@ -113,7 +113,6 @@ def assemble_seed_release(
             )
         )
         validate_release(temporary, expected_version=version)
-        write_checksums(temporary)
         if output.exists():
             raise ValidationError(f"output directory already exists: {output}")
         os.rename(temporary, output)
@@ -195,10 +194,6 @@ def _validate_indexed_release(
         manifest = build.manifest
         if manifest.catalog_key != catalog_key:
             raise ValidationError("index key does not match manifest catalog_key")
-        if manifest.descriptor != entry.descriptor:
-            raise ValidationError("index descriptor does not match manifest descriptor")
-        if manifest.source_revision != entry.source_revision:
-            raise ValidationError("index source revision does not match manifest source revision")
         if manifest.version != index.release_version:
             raise ValidationError("manifest version does not match index release_version")
         for asset in manifest.assets.values():
@@ -207,6 +202,13 @@ def _validate_indexed_release(
                 raise ValidationError(f"filename collision: {asset.filename!r}")
             claimed.add(asset.filename)
         manifests[catalog_key] = (manifest_path, manifest)
+    expected_source_updated_at = max_source_updated_at(
+        manifest.source_revision for _, manifest in manifests.values()
+    )
+    if index.source_updated_at != expected_source_updated_at:
+        raise ValidationError(
+            "index source_updated_at does not match the maximum manifest source timestamp"
+        )
     return index, manifests
 
 

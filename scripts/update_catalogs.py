@@ -60,8 +60,6 @@ class CatalogConfig:
     max_changed_rows: int
     enabled: bool
     seed_required: bool
-    seed_from_catalog: str | None
-    max_seed_inference_rows: int
     descriptor: CatalogDescriptor
 
 
@@ -101,13 +99,6 @@ def load_config(path: Path) -> list[CatalogConfig]:
             )
         if descriptor.recommended:
             recommended_profiles.add(recommendation_key)
-        seed_from_catalog = raw.get("seed_from_catalog")
-        if seed_from_catalog is not None:
-            seed_from_catalog = _required_text(
-                seed_from_catalog, f"catalog {key!r} seed_from_catalog"
-            )
-            if seed_from_catalog == key:
-                raise ValidationError(f"catalog {key!r} cannot seed itself")
         catalogs.append(
             CatalogConfig(
                 key=key,
@@ -121,11 +112,6 @@ def load_config(path: Path) -> list[CatalogConfig]:
                 ),
                 enabled=bool(raw.get("enabled", False)),
                 seed_required=bool(raw.get("seed_required", True)),
-                seed_from_catalog=seed_from_catalog,
-                max_seed_inference_rows=_non_negative_int(
-                    raw.get("max_seed_inference_rows", 0),
-                    f"catalog {key!r} max_seed_inference_rows",
-                ),
                 descriptor=descriptor,
             )
         )
@@ -385,38 +371,34 @@ def build_enabled_catalogs(
         previous_manifest = previous_dir / manifest_filename_for_catalog(config.key)
         previous: CatalogBuild | None = None
         seed_embeddings = None
+        seed_fingerprints: dict[str, str] | None = None
+        seed_label = config.key
+        seed_inference_limit = config.max_changed_rows
         if previous_manifest.exists():
             previous = load_catalog_build(previous_manifest, asset_dir=previous_dir)
-        elif config.seed_from_catalog is not None:
-            seed_manifest = previous_dir / manifest_filename_for_catalog(
-                config.seed_from_catalog
-            )
-            if not seed_manifest.exists():
-                raise ValidationError(
-                    f"catalog {config.key!r} requires seed catalog "
-                    f"{config.seed_from_catalog!r} in the previous release"
+            if previous.manifest.descriptor != config.descriptor:
+                old = previous.manifest.descriptor
+                new = config.descriptor
+                if (
+                    old.game != new.game
+                    or old.source != new.source
+                    or old.result_identifier != new.result_identifier
+                    or previous.manifest.embedding_model != config.embedding_model
+                ):
+                    raise ValidationError(
+                        f"catalog {config.key!r} changed incompatible descriptor identity"
+                    )
+                seed_embeddings = dict(
+                    zip(
+                        (row.key for row in previous.rows),
+                        previous.embeddings,
+                        strict=True,
+                    )
                 )
-            seed = load_catalog_build(seed_manifest, asset_dir=previous_dir)
-            if seed.manifest.embedding_model != config.embedding_model:
-                raise ValidationError(
-                    f"catalog {config.key!r} and seed catalog "
-                    f"{config.seed_from_catalog!r} use different embedding models"
-                )
-            if (
-                seed.manifest.descriptor.game != config.descriptor.game
-                or seed.manifest.descriptor.source != config.descriptor.source
-            ):
-                raise ValidationError(
-                    f"catalog {config.key!r} and seed catalog "
-                    f"{config.seed_from_catalog!r} must describe the same game and source"
-                )
-            seed_embeddings = dict(
-                zip(
-                    (row.key for row in seed.rows),
-                    seed.embeddings,
-                    strict=True,
-                )
-            )
+                seed_fingerprints = {
+                    row.key: row.image_fingerprint for row in previous.rows
+                }
+                previous = None
         elif config.seed_required and not allow_full_rebuild:
             raise ValidationError(
                 f"catalog {config.key!r} requires a seed release; "
@@ -434,19 +416,24 @@ def build_enabled_catalogs(
         quality_reports[config.key] = quality_result.report()
         quality_reports[config.key]["source_revision"] = snapshot.revision.to_dict()
         if seed_embeddings is not None:
-            target_keys = {row.key for row in rows}
-            missing_seed_keys = [row.key for row in rows if row.key not in seed_embeddings]
-            if len(missing_seed_keys) > config.max_seed_inference_rows:
+            reusable_keys = {
+                row.key
+                for row in rows
+                if seed_fingerprints is not None
+                and seed_fingerprints.get(row.key) == row.image_fingerprint
+            }
+            missing_seed_keys = [row.key for row in rows if row.key not in reusable_keys]
+            if len(missing_seed_keys) > seed_inference_limit:
                 raise ValidationError(
                     f"catalog {config.key!r} is missing {len(missing_seed_keys):,} "
-                    f"embedding(s) from seed catalog {config.seed_from_catalog!r}, exceeding "
-                    f"its limit of {config.max_seed_inference_rows:,}; "
+                    f"embedding(s) from seed catalog {seed_label!r}, exceeding "
+                    f"its limit of {seed_inference_limit:,}; "
                     f"examples: {missing_seed_keys[:3]}"
                 )
             seed_embeddings = {
                 key: embedding
                 for key, embedding in seed_embeddings.items()
-                if key in target_keys
+                if key in reusable_keys
             }
         unavailable_keys: set[str] = set()
         if source_type == "tcgcsv" and cache_root is not None:

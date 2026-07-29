@@ -32,13 +32,10 @@ Catalog v2 is a beta discovered through an explicit release tag. CollectorVision
 Catalog v1 remains
 available from Hugging Face and is not changed by this repository.
 
-Catalog descriptors in the release index and manifests expose independent
-physical profiles. The compact Scryfall `cards` profile reuses matching
-embeddings from the published `printings` catalog for its initial snapshot;
-the build permits at most 100 missing rows to be downloaded and embedded.
-Later releases update it independently. The `artworks` profile remains disabled
-until it receives a seed. Profile availability does not imply that an embedding
-model can reliably distinguish every edition or language.
+Scryfall publishes one default MTG catalog from its `default_cards` bulk data.
+Applications that do not want promos, art cards, tokens, or other extras should
+filter candidates during lookup rather than download a separate recognition
+catalog.
 
 The first production release will be seeded from the existing local Milo
 catalogs. Scheduled builds should only be enabled for a catalog after that seed
@@ -115,8 +112,9 @@ gh release create "$VERSION" --prerelease --latest=false release/*
 
 The assembler validates every manifest and asset before atomically exposing
 `release/`. The flat release contains one combined index, each catalog manifest,
-full recognition snapshots, optional full metadata, updater state, empty seed
-deltas, merged quality and seed reports, and deterministic `SHA256SUMS`.
+full recognition snapshots, optional full metadata, updater state, and merged
+quality and seed reports. Zero-operation deltas have no assets. The index
+verifies each manifest, and each manifest verifies its assets.
 It also rejects a beta tag whose date differs from the index's maximum upstream
 UTC update date. Expected revisions make a source change between status and
 fetch abort instead of publishing a misleading tag.
