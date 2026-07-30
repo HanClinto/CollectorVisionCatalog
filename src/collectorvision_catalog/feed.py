@@ -39,6 +39,15 @@ def _version(value: Any, name: str) -> int:
     return value
 
 
+def _version_key(value: Any) -> int:
+    if not isinstance(value, str) or not value.isascii() or not value.isdecimal():
+        raise ValidationError("feed update keys must be decimal versions")
+    version = int(value)
+    if str(version) != value:
+        raise ValidationError("feed update keys must use canonical decimal versions")
+    return version
+
+
 @dataclass(frozen=True)
 class FileReference:
     url: str
@@ -50,7 +59,7 @@ class FileReference:
         return PurePosixPath(unquote(urlparse(self.url).path)).name
 
     def to_dict(self) -> dict[str, str | int]:
-        return {"url": self.url, "sha256": self.sha256, "size": self.size}
+        return {"url": self.url, "size": self.size, "sha256": self.sha256}
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> FileReference:
@@ -98,9 +107,9 @@ class AssetReference:
     def to_dict(self) -> dict[str, str | int]:
         return {
             "url": self.url,
-            "sha256": self.sha256,
-            "size": self.size,
             "rows": self.rows,
+            "size": self.size,
+            "sha256": self.sha256,
         }
 
     @classmethod
@@ -246,7 +255,7 @@ class CatalogFeedEntry:
     rows: int
     source_updated_at: str
     base: SnapshotReference
-    deltas: tuple[DeltaReference, ...]
+    updates: dict[int, DeltaReference]
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -255,7 +264,10 @@ class CatalogFeedEntry:
             "rows": self.rows,
             "source_updated_at": self.source_updated_at,
             "base": self.base.to_dict(),
-            "deltas": [delta.to_dict() for delta in self.deltas],
+            "updates": {
+                str(version): update.to_dict()
+                for version, update in sorted(self.updates.items())
+            },
         }
 
     @classmethod
@@ -268,31 +280,36 @@ class CatalogFeedEntry:
                 "rows",
                 "source_updated_at",
                 "base",
-                "deltas",
+                "updates",
             },
             "catalog feed entry",
         )
         public_name = validate_public_name(payload.get("public_name"))
         current_version = _version(payload.get("current_version"), "feed current_version")
         base = SnapshotReference.from_dict(_require_mapping(payload.get("base"), "feed base"))
-        raw_deltas = payload.get("deltas")
-        if not isinstance(raw_deltas, list):
-            raise ValidationError("feed deltas must be a list")
-        deltas = tuple(
-            DeltaReference.from_dict(_require_mapping(item, "feed delta")) for item in raw_deltas
-        )
+        raw_updates = _require_mapping(payload.get("updates"), "feed updates")
+        updates: dict[int, DeltaReference] = {}
+        for raw_version, raw_update in raw_updates.items():
+            version = _version_key(raw_version)
+            update = DeltaReference.from_dict(
+                _require_mapping(raw_update, f"feed update {raw_version!r}")
+            )
+            if update.to_version != version:
+                raise ValidationError("feed update key must match to_version")
+            updates[version] = update
+        ordered_updates = tuple(updates[version] for version in sorted(updates))
         expected = (
             base.version - 1
-            if deltas and deltas[0].to_version == base.version
+            if ordered_updates and ordered_updates[0].to_version == base.version
             else base.version
         )
-        for delta in deltas:
-            if delta.from_version != expected:
-                raise ValidationError("feed delta chain is not contiguous")
-            expected = delta.to_version
-        reached = base.version if not deltas else deltas[-1].to_version
+        for update in ordered_updates:
+            if update.from_version != expected:
+                raise ValidationError("feed update chain is not contiguous")
+            expected = update.to_version
+        reached = base.version if not ordered_updates else ordered_updates[-1].to_version
         if reached != current_version:
-            raise ValidationError("feed delta chain does not reach current_version")
+            raise ValidationError("feed update chain does not reach current_version")
         entry = cls(
             public_name=public_name,
             current_version=current_version,
@@ -303,13 +320,13 @@ class CatalogFeedEntry:
                 )
             ),
             base=base,
-            deltas=deltas,
+            updates={update.to_version: update for update in ordered_updates},
         )
         _validate_reference_urls(entry)
         expected_rows = entry.base.rows
-        for delta in entry.deltas:
-            if delta.from_version >= entry.base.version:
-                expected_rows += delta.recognition.added - delta.recognition.deleted
+        for update in entry.updates.values():
+            if update.from_version >= entry.base.version:
+                expected_rows += update.recognition.added - update.recognition.deleted
         if entry.rows != expected_rows:
             raise ValidationError("feed catalog rows do not match its base and deltas")
         return entry
@@ -399,7 +416,7 @@ def update_catalog_feed(
         delta_indexes = list(range(base_index + 1, len(manifests)))
         if base_manifest.delta is not None:
             delta_indexes.insert(0, base_index)
-        deltas = tuple(
+        updates = tuple(
             _delta_reference(Path(records[index][0]), manifests[index]) for index in delta_indexes
         )
         current = manifests[-1]
@@ -410,7 +427,7 @@ def update_catalog_feed(
                 rows=current.rows,
                 source_updated_at=current.source_revision.updated_at,
                 base=base,
-                deltas=deltas,
+                updates={update.to_version: update for update in updates},
             ).to_dict()
         )
     return CatalogFeed.from_dict(
@@ -421,7 +438,7 @@ def update_catalog_feed(
 def write_catalog_feed(path: str | Path, feed: CatalogFeed) -> None:
     validated = CatalogFeed.from_dict(feed.to_dict())
     Path(path).write_text(
-        json.dumps(validated.to_dict(), indent=2, sort_keys=True) + "\n",
+        json.dumps(validated.to_dict(), indent=2) + "\n",
         encoding="utf-8",
     )
 
@@ -507,7 +524,10 @@ def _validate_manifest_files(path: Path, manifest: CatalogVersionManifest) -> No
 def _validate_reference_urls(entry: CatalogFeedEntry) -> None:
     stages: list[tuple[int, FileReference, Mapping[str, AssetReference]]] = [
         (entry.base.version, entry.base.manifest, entry.base.assets),
-        *((delta.to_version, delta.manifest, delta.assets) for delta in entry.deltas),
+        *(
+            (update.to_version, update.manifest, update.assets)
+            for update in entry.updates.values()
+        ),
     ]
     for version, manifest, assets in stages:
         expected = f"{PUBLIC_BASE_URL}/{entry.public_name}/version/{version}/"

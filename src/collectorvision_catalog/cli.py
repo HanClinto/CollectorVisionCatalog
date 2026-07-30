@@ -27,7 +27,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "inspect":
             manifest = load_manifest(args.manifest)
-            print(json.dumps(manifest.to_dict(), indent=2, sort_keys=True))
+            print(json.dumps(manifest.to_dict(), indent=2))
             return 0
         if args.command == "validate":
             build = validate_artifacts(args.manifest, asset_dir=args.asset_dir)

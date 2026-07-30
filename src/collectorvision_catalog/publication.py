@@ -329,7 +329,7 @@ def publish_catalog_version(
         )
         manifest = CatalogVersionManifest.from_dict(manifest.to_dict())
         (staging_dir / "manifest.json").write_text(
-            json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n",
+            json.dumps(manifest.to_dict(), indent=2) + "\n",
             encoding="utf-8",
         )
         staging_dir.replace(version_dir)

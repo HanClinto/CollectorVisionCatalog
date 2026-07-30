@@ -78,7 +78,7 @@ def test_initial_base_only_feed(workspace: Path) -> None:
     assert entry.base.rows == 1
     assert set(entry.base.assets) == {"embeddings", "identifiers", "metadata"}
     assert entry.base.assets["identifiers"].rows == 1
-    assert entry.deltas == ()
+    assert entry.updates == {}
     assert "/scryfall-mtg/version/0/manifest.json" in entry.base.manifest.url
     assert set(entry.base.manifest.to_dict()) == {"url", "sha256", "size"}
     assert set(entry.base.assets["identifiers"].to_dict()) == {
@@ -97,14 +97,17 @@ def test_version_zero_delta_chain(workspace: Path) -> None:
     entry = _feed([record0, record1, record2]).catalogs[CATALOG_KEY]
 
     assert entry.base.version == 0
-    assert [(delta.from_version, delta.to_version) for delta in entry.deltas] == [
+    assert [
+        (update.from_version, update.to_version) for update in entry.updates.values()
+    ] == [
         (0, 1),
         (1, 2),
     ]
-    assert entry.deltas[0].rows == 1
-    assert entry.deltas[0].recognition.updated == 1
-    assert entry.deltas[0].metadata.updated == 1
-    assert entry.deltas[0].assets["embeddings"].rows == 1
+    assert entry.updates[1].rows == 1
+    assert entry.updates[1].recognition.updated == 1
+    assert entry.updates[1].metadata.updated == 1
+    assert entry.updates[1].assets["embeddings"].rows == 1
+    assert list(entry.to_dict()["updates"]) == ["1", "2"]
 
 
 def test_routine_checkpoint_keeps_bridge_delta(workspace: Path) -> None:
@@ -115,7 +118,9 @@ def test_routine_checkpoint_keeps_bridge_delta(workspace: Path) -> None:
     entry = _feed([record10, record11]).catalogs[CATALOG_KEY]
 
     assert entry.base.version == 10
-    assert [(delta.from_version, delta.to_version) for delta in entry.deltas] == [
+    assert [
+        (update.from_version, update.to_version) for update in entry.updates.values()
+    ] == [
         (9, 10),
         (10, 11),
     ]
@@ -129,7 +134,9 @@ def test_hard_checkpoint_drops_earlier_deltas(workspace: Path) -> None:
     entry = _feed([record10, record11]).catalogs[CATALOG_KEY]
 
     assert entry.base.version == 10
-    assert [(delta.from_version, delta.to_version) for delta in entry.deltas] == [(10, 11)]
+    assert [
+        (update.from_version, update.to_version) for update in entry.updates.values()
+    ] == [(10, 11)]
 
 
 def test_invalid_history_is_rejected(workspace: Path) -> None:
@@ -174,8 +181,27 @@ def test_inconsistent_row_summaries_are_rejected(workspace: Path) -> None:
         CatalogFeed.from_dict(payload)
 
     payload = _feed([record0, record1]).to_dict()
-    payload["catalogs"][CATALOG_KEY]["deltas"][0]["assets"]["embeddings"]["rows"] += 1
+    payload["catalogs"][CATALOG_KEY]["updates"]["1"]["assets"]["embeddings"]["rows"] += 1
     with pytest.raises(ValidationError, match="embedding rows"):
+        CatalogFeed.from_dict(payload)
+
+
+def test_update_keys_must_be_canonical_target_versions(workspace: Path) -> None:
+    build0, record0 = _publish(workspace, 0)
+    _, record1 = _publish(workspace, 1, build0)
+    payload = _feed([record0, record1]).to_dict()
+    payload["catalogs"][CATALOG_KEY]["updates"]["01"] = payload["catalogs"][CATALOG_KEY][
+        "updates"
+    ].pop("1")
+
+    with pytest.raises(ValidationError, match="canonical decimal"):
+        CatalogFeed.from_dict(payload)
+
+    payload = _feed([record0, record1]).to_dict()
+    payload["catalogs"][CATALOG_KEY]["updates"]["2"] = payload["catalogs"][CATALOG_KEY][
+        "updates"
+    ].pop("1")
+    with pytest.raises(ValidationError, match="match to_version"):
         CatalogFeed.from_dict(payload)
 
 
@@ -189,5 +215,5 @@ def test_deterministic_serialization_round_trip(workspace: Path) -> None:
     write_catalog_feed(second, load_catalog_feed(first))
 
     assert first.read_bytes() == second.read_bytes()
-    assert first.read_text().startswith('{\n  "catalogs":')
+    assert first.read_text().startswith('{\n  "checked_at":')
     assert load_catalog_feed(first) == feed

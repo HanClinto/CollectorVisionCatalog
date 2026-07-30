@@ -197,18 +197,20 @@ defined as a chain that starts from `base.version`:
         "manifest": {"url": ".../version/10/manifest.json", "size": 1900, "sha256": "..."},
         "assets": {}
       },
-      "deltas": [
-        {"from_version": 9, "to_version": 10, "manifest": {"url": ".../version/10/manifest.json", "size": 1900, "sha256": "..."}, "assets": {}},
-        {"from_version": 10, "to_version": 11, "manifest": {"url": ".../version/11/manifest.json", "size": 1300, "sha256": "..."}, "assets": {}},
-        {"from_version": 11, "to_version": 12, "manifest": {"url": ".../version/12/manifest.json", "size": 1300, "sha256": "..."}, "assets": {}}
-      ]
+      "updates": {
+        "10": {"from_version": 9, "to_version": 10, "manifest": {"url": ".../version/10/manifest.json", "size": 1900, "sha256": "..."}, "assets": {}},
+        "11": {"from_version": 10, "to_version": 11, "manifest": {"url": ".../version/11/manifest.json", "size": 1300, "sha256": "..."}, "assets": {}},
+        "12": {"from_version": 11, "to_version": 12, "manifest": {"url": ".../version/12/manifest.json", "size": 1300, "sha256": "..."}, "assets": {}}
+      }
     }
   }
 }
 ```
 
-Each delta must be contiguous with the next delta. The first delta may start one
-version before `base.version`; clients select the suffix whose `from_version`
+Update keys are canonical target-version numbers, and each update's
+`to_version` must match its key. Updates must form a contiguous chain when
+ordered numerically. The first update may start one version before
+`base.version`; clients select the suffix whose `from_version`
 matches their installed version. Clients with no matching suffix install
 `base`, then select the suffix starting at `base.version`. A hard checkpoint
-discards all earlier deltas, so its list begins after the checkpoint.
+discards all earlier updates, so its map begins after the checkpoint.

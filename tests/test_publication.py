@@ -53,7 +53,7 @@ def test_initial_version_publishes_only_readable_base_paths(workspace: Path) -> 
     )
 
     assert path == workspace / "public/scryfall-mtg/version/0/manifest.json"
-    assert path.read_text().startswith('{\n  "base":')
+    assert path.read_text().startswith('{\n  "catalog_key":')
     assert manifest.delta is None
     assert manifest.base is not None
     assert set(manifest.base) == {"embeddings", "identifiers", "metadata"}
