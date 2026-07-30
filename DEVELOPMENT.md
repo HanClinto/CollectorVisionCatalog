@@ -9,8 +9,8 @@ The source adapters, deterministic FP16/JSONL artifact builder, exact
 predecessor deltas, historical Scryfall replay, and immutable version staging
 are implemented.
 
-The catalog-local feed, immutable public manifests, and catalog-first Pages
-layout are implemented. The remaining Catalog v2 cutover work is:
+The family-scoped feed, release audits, and catalog-first Pages layout are
+implemented. The remaining Catalog v2 cutover work is:
 
 1. Assign catalog-local versions in the updater and skip unchanged catalogs.
 2. Restore scheduled publication after the updater uses the active contract.
@@ -18,11 +18,8 @@ layout are implemented. The remaining Catalog v2 cutover work is:
    catalog-local contract.
 
 The builder now emits compact primary `id` plus optional `face_index` records
-with line-aligned metadata. The currently published beta still uses the prior
-row and immutable-manifest layouts and will be regenerated after the remaining
-contract review. Update the Catalog Explorer's artifact parser alongside that
-regeneration; the live explorer intentionally continues to read the currently
-published immutable manifests.
+with line-aligned metadata. The currently published beta assets still use the
+prior row layout and will be regenerated after the remaining contract review.
 
 Catalog v2 is unreleased, so discarded prototypes do not require compatibility
 aliases or fallback parsers. Catalog v1 must remain unchanged.
@@ -40,7 +37,7 @@ ruff check .
 - [`docs/catalog-v2.md`](docs/catalog-v2.md) describes artifacts, sources,
   metadata boundaries, and the update algorithm.
 - [`docs/versioning.md`](docs/versioning.md) defines catalog-local versions,
-  checkpoints, manifests, feed routes, and public paths.
+  checkpoints, release audits, feed routes, and public paths.
 - [`config/catalogs.json`](config/catalogs.json) lists source catalogs.
 - [`config/source-quality-overrides.json`](config/source-quality-overrides.json)
   contains reviewed source-image exclusions.

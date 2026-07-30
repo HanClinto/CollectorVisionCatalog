@@ -29,12 +29,13 @@ The moving feed is published at:
 https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-feed-v2.json
 ```
 
-`checked_at` advances even when no catalog changes. Each catalog entry records
-its own source freshness and supported routes to its current version. Dates are
-manifest metadata, not storage identity.
+`checked_at` advances even when no catalog changes. Each family defines one
+immutable embedding contract, while each catalog records its source freshness
+and supported routes to its current version. Dates are feed and audit metadata,
+not storage identity.
 
 The complete catalog-local numbering rules, routine and hard checkpoints,
-public paths, feed routing, and manifest structure are defined in
+public paths, feed routing, and release audits are defined in
 [Catalog v2 versioning and paths](versioning.md). Discarded prototypes do not
 receive aliases or fallback parsers.
 
@@ -43,7 +44,7 @@ replace or mutate v1 manifests.
 
 ## Artifact layers
 
-Each catalog manifest references three independent layers.
+Each catalog feed entry references independent recognition and metadata layers.
 
 ### Minimal recognition layer
 
@@ -163,18 +164,18 @@ new base.
 
 A hard checkpoint publishes a base without a delta and deliberately forces a
 full refresh. See [Catalog v2 versioning and paths](versioning.md) for the exact
-rules and manifest shapes.
+rules and feed shapes.
 
 Delta operations cannot rely on row alignment, so they target a row with `id`
 and an optional nonzero `face_index`. Recognition upserts carry changed
 identifiers and embeddings; metadata upserts carry changed metadata. Deletes
-use the same compact target. The provider remains catalog-level manifest data.
+use the same compact target. The provider remains catalog-level descriptor data.
 Recognition and metadata operations are independent and idempotent, so a
 removed row may have a delete in both layers.
 
 ### Reconstructing historical Scryfall snapshots
 
-Timestamped `source_revision.uri` values in published manifests can be replayed
+Timestamped `source_revision.uri` values in release audits can be replayed
 without changing the normal catalog builder. Use a config with only the Scryfall
 catalog enabled, then provide an archived `.json`, `.json.gz`, `.jsonl`, or
 `.jsonl.gz` file or URL:

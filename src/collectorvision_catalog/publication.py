@@ -428,16 +428,12 @@ def publish_catalog_version(
             ),
         )
         manifest = CatalogVersionManifest.from_dict(manifest.to_dict())
-        (staging_dir / "manifest.json").write_text(
-            json.dumps(manifest.to_dict(), indent=2) + "\n",
-            encoding="utf-8",
-        )
         staging_dir.replace(version_dir)
     except BaseException:
         if staging_dir.exists():
             shutil.rmtree(staging_dir)
         raise
-    return manifest, version_dir / "manifest.json"
+    return manifest, version_dir
 
 
 def load_catalog_version_manifest(path: str | Path) -> CatalogVersionManifest:

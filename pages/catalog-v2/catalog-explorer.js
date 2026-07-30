@@ -84,65 +84,81 @@ async function readJsonlGzip(url) {
   return records;
 }
 
-function catalogRoot(entry) {
-  return entry.base.manifest.url.replace(/\/version\/\d+\/manifest\.json$/, "");
-}
-
-function assetUrl(manifestUrl, asset) {
-  return new URL(asset.path, manifestUrl).href;
-}
-
-async function loadHistory(entry) {
-  const root = catalogRoot(entry);
-  return Promise.all(
-    Array.from({ length: entry.current_version + 1 }, (_, version) =>
-      fetchJson(`${root}/version/${version}/manifest.json`).then((manifest) => ({
-        manifest,
-        url: `${root}/version/${version}/manifest.json`,
-      })),
-    ),
+function loadHistory(entry) {
+  const updates = Object.values(entry.updates).sort(
+    (left, right) => left.to_version - right.to_version,
   );
+  const stages = new Map();
+  stages.set(entry.base.version, {
+    version: entry.base.version,
+    rows: entry.base.rows,
+    source_updated_at: entry.base.source_updated_at,
+    base: entry.base,
+    update: entry.updates[String(entry.base.version)] || null,
+  });
+  let rows = entry.base.rows;
+  for (const update of updates) {
+    if (update.to_version < entry.base.version) continue;
+    if (update.to_version > entry.base.version) {
+      rows += update.rows.added - update.rows.deleted;
+    }
+    const stage = stages.get(update.to_version) || {
+      version: update.to_version,
+      rows,
+      source_updated_at: update.source_updated_at,
+      base: null,
+      update: null,
+    };
+    stage.update = update;
+    stage.rows = rows;
+    stage.source_updated_at = update.source_updated_at;
+    stages.set(update.to_version, stage);
+  }
+  return [...stages.values()].sort((left, right) => left.version - right.version);
 }
 
 function chip(text, kind = "") {
   return element("span", `chip ${kind}`.trim(), text);
 }
 
-function updateChips(manifest) {
-  if (!manifest.delta) return [chip(`${number.format(manifest.rows)} initial rows`)];
-  const { recognition, metadata } = manifest.delta;
+function updateChips(stage) {
+  if (!stage.update) return [chip(`${number.format(stage.rows)} base rows`)];
+  const { rows, recognition, metadata } = stage.update;
   const chips = [];
-  if (recognition.added) chips.push(chip(`${recognition.added} added`, "added"));
-  if (recognition.updated) {
-    chips.push(chip(`${recognition.updated} recognition updates`, "updated"));
-  }
-  if (recognition.deleted) chips.push(chip(`${recognition.deleted} deleted`, "deleted"));
-  if (metadata.updated) chips.push(chip(`${metadata.updated} metadata fixes`, "updated"));
-  return chips.length ? chips : [chip(`${manifest.delta.rows} rows changed`)];
+  if (rows.added) chips.push(chip(`${rows.added} added`, "added"));
+  if (rows.updated) chips.push(chip(`${rows.updated} updated`, "updated"));
+  if (rows.deleted) chips.push(chip(`${rows.deleted} deleted`, "deleted"));
+  if (metadata.rows) chips.push(chip(`${metadata.rows} metadata rows`, "updated"));
+  if (recognition.rows) chips.push(chip(`${recognition.rows} recognition rows`));
+  return chips;
 }
 
 function renderUpdate(history, index) {
-  const { manifest } = history[index];
+  const stage = history[index];
   const update = element("article", "update");
   const header = element("div", "update-header");
   const title = element("div");
   title.append(
-    element("h3", "", index === 0 ? "Initial catalog" : `Version ${manifest.version}`),
+    element(
+      "h3",
+      "",
+      stage.version === 0 ? "Initial catalog" : `Version ${stage.version}`,
+    ),
     element(
       "div",
       "update-meta",
-      `${formatDate(manifest.source_revision.updated_at)} · ${number.format(manifest.rows)} total rows`,
+      `${formatDate(stage.source_updated_at)} · ${number.format(stage.rows)} total rows`,
     ),
   );
   header.append(title);
-  if (manifest.delta) {
+  if (stage.update && index > 0) {
     const button = element("button", "", "Explore changes");
     button.type = "button";
     button.addEventListener("click", () => loadUpdateDetails(button, update, history, index));
     header.append(button);
   }
   const chips = element("div", "chips");
-  chips.append(...updateChips(manifest));
+  chips.append(...updateChips(stage));
   update.append(header, chips);
   return update;
 }
@@ -153,12 +169,12 @@ async function loadCatalogBody(body, entry) {
   const loading = element("div", "loading", "Loading update history...");
   body.append(loading);
   try {
-    const history = await loadHistory(entry);
+    const history = loadHistory(entry);
     loading.remove();
     const description = element(
       "p",
       "catalog-description",
-      history.at(-1).manifest.descriptor.description,
+      entry.descriptor.description,
     );
     const updates = element("div", "updates");
     for (let index = history.length - 1; index >= 0; index -= 1) {
@@ -221,12 +237,13 @@ function renderSections(items) {
   }
 }
 
-async function loadCurrentDescriptors(feed) {
-  return Promise.all(
-    Object.entries(feed.catalogs).map(async ([key, entry]) => {
-      const manifest = await fetchJson(entry.base.manifest.url);
-      return { key, entry, descriptor: manifest.descriptor };
-    }),
+function loadCurrentDescriptors(feed) {
+  return Object.entries(feed.families).flatMap(([family, familyEntry]) =>
+    Object.entries(familyEntry.catalogs).map(([key, entry]) => ({
+      key: `${family}/${key}`,
+      entry,
+      descriptor: entry.descriptor,
+    })),
   );
 }
 
@@ -247,29 +264,30 @@ function applyMetadataOperations(state, records) {
 
 async function reconstructPriorState(history, targetIndex) {
   let baseIndex = targetIndex - 1;
-  while (baseIndex >= 0 && !history[baseIndex].manifest.base) baseIndex -= 1;
+  while (baseIndex >= 0 && !history[baseIndex].base) baseIndex -= 1;
   if (baseIndex < 0) throw new Error("No usable base exists for this update.");
   const base = history[baseIndex];
   const [identifierRows, metadataRows] = await Promise.all([
-    readJsonlGzip(assetUrl(base.url, base.manifest.base.identifiers)),
-    readJsonlGzip(assetUrl(base.url, base.manifest.base.metadata)),
+    readJsonlGzip(base.base.recognition.assets.identifiers.url),
+    readJsonlGzip(base.base.metadata.assets.records.url),
   ]);
   const identifiers = new Map(identifierRows.map((record) => [record.key, record]));
   const metadata = new Map(metadataRows.map((record) => [record.key, record.metadata]));
   for (let index = baseIndex + 1; index < targetIndex; index += 1) {
     const stage = history[index];
-    const assets = stage.manifest.delta.assets;
+    const recognitionAssets = stage.update.recognition.assets;
+    const metadataAssets = stage.update.metadata.assets;
     const jobs = [];
-    if (assets.identifiers) {
+    if (recognitionAssets.identifiers) {
       jobs.push(
-        readJsonlGzip(assetUrl(stage.url, assets.identifiers)).then((records) =>
+        readJsonlGzip(recognitionAssets.identifiers.url).then((records) =>
           applyIdentifierOperations(identifiers, records),
         ),
       );
     }
-    if (assets.metadata) {
+    if (metadataAssets.records) {
       jobs.push(
-        readJsonlGzip(assetUrl(stage.url, assets.metadata)).then((records) =>
+        readJsonlGzip(metadataAssets.records.url).then((records) =>
           applyMetadataOperations(metadata, records),
         ),
       );
@@ -335,10 +353,13 @@ function sourcePage(identifiers) {
 async function analyzeUpdate(history, index) {
   const prior = await reconstructPriorState(history, index);
   const stage = history[index];
-  const assets = stage.manifest.delta.assets;
+  const recognitionAssets = stage.update.recognition.assets;
+  const metadataAssets = stage.update.metadata.assets;
   const [identifierOps, metadataOps] = await Promise.all([
-    assets.identifiers ? readJsonlGzip(assetUrl(stage.url, assets.identifiers)) : [],
-    assets.metadata ? readJsonlGzip(assetUrl(stage.url, assets.metadata)) : [],
+    recognitionAssets.identifiers
+      ? readJsonlGzip(recognitionAssets.identifiers.url)
+      : [],
+    metadataAssets.records ? readJsonlGzip(metadataAssets.records.url) : [],
   ]);
   const targetMetadata = new Map(
     metadataOps
@@ -568,7 +589,7 @@ async function main() {
     const feed = await fetchJson(FEED_URL);
     document.querySelector("#catalog-status").textContent =
       `Last checked ${relativeDate(feed.checked_at)} · ${formatDate(feed.checked_at)}`;
-    renderSections(await loadCurrentDescriptors(feed));
+    renderSections(loadCurrentDescriptors(feed));
   } catch (error) {
     const target = document.querySelector("#catalog-error");
     target.hidden = false;

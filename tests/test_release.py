@@ -19,7 +19,6 @@ from collectorvision_catalog import (
     manifest_filename_for_catalog,
     validate_release,
     write_catalog_index,
-    write_checksums,
 )
 
 VERSION = "catalog-v2-beta.1-2026-07-24"
@@ -180,35 +179,6 @@ def test_assembly_rejects_tampered_manifest_asset_and_non_seed(workspace: Path) 
         assemble_seed_release([incremental], workspace / "not-seed", VERSION)
 
 
-def test_checksums_are_deterministic_and_existing_release_is_validated(workspace: Path) -> None:
-    seed = workspace / "seed"
-    _seed(seed, "demo/catalog")
-    output = workspace / "release"
-    assemble_seed_release([seed], output, VERSION)
-    checksums = output / "SHA256SUMS"
-    assert not checksums.exists()
-
-    write_checksums(output)
-    original = checksums.read_bytes()
-    write_checksums(output)
-    assert checksums.read_bytes() == original
-    lines = original.decode().splitlines()
-    assert lines == sorted(lines, key=lambda line: line.split("  ", 1)[1])
-    assert all(not line.endswith("SHA256SUMS") for line in lines)
-
-    quality = output / "quality-report.json"
-    quality_bytes = quality.read_bytes()
-    quality.write_bytes(quality_bytes + b" ")
-    with pytest.raises(ValidationError, match="SHA256SUMS"):
-        validate_release(output)
-    quality.write_bytes(quality_bytes)
-
-    manifest = output / manifest_filename_for_catalog("demo/catalog")
-    manifest.write_bytes(manifest.read_bytes() + b" ")
-    with pytest.raises(ValidationError, match="checksum"):
-        validate_release(output)
-
-
 def test_cli_assembles_and_validates_release(workspace: Path) -> None:
     seed = workspace / "seed"
     _seed(seed, "demo/catalog")
@@ -227,8 +197,6 @@ def test_cli_assembles_and_validates_release(workspace: Path) -> None:
         )
         == 0
     )
-    checksum_path = output / "SHA256SUMS"
-    assert not checksum_path.exists()
     with pytest.raises(ValidationError, match="does not match expected"):
         ASSEMBLE_RELEASE.main(
             [
@@ -239,21 +207,12 @@ def test_cli_assembles_and_validates_release(workspace: Path) -> None:
                 "wrong-version",
             ]
         )
-    assert not checksum_path.exists()
     assert (
         ASSEMBLE_RELEASE.main(
-            [
-                "validate",
-                "--release-dir",
-                str(output),
-                "--version",
-                VERSION,
-                "--write-checksums",
-            ]
+            ["validate", "--release-dir", str(output), "--version", VERSION]
         )
         == 0
     )
-    assert checksum_path.is_file()
 
 
 def test_beta_release_date_must_match_latest_source_date(workspace: Path) -> None:

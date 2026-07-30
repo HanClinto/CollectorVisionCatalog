@@ -24,9 +24,7 @@ from .index import CatalogIndex, CatalogIndexEntry, load_catalog_index
 INDEX_FILENAME = "catalog-index-v2.json"
 QUALITY_FILENAME = "quality-report.json"
 SEED_SUMMARY_FILENAME = "seed-summary.json"
-CHECKSUM_FILENAME = "SHA256SUMS"
 _ASSEMBLY_FILENAMES = {
-    CHECKSUM_FILENAME,
     INDEX_FILENAME,
     QUALITY_FILENAME,
     SEED_SUMMARY_FILENAME,
@@ -57,7 +55,6 @@ def assemble_seed_release(
     source_revisions = []
     for source in sources:
         index, manifests = _validate_indexed_release(source, expected_version=version)
-        _verify_checksums_if_present(source)
         for manifest_path, manifest in manifests.values():
             if (
                 manifest.previous_version is not None
@@ -129,30 +126,12 @@ def validate_release(
     release_dir: str | Path,
     *,
     expected_version: str | None = None,
-    verify_checksums: bool = True,
 ) -> CatalogIndex:
-    """Validate a complete flat release and verify SHA256SUMS when it exists."""
+    """Validate a complete flat internal seed release."""
     directory = Path(release_dir)
     index, manifests = _validate_indexed_release(directory, expected_version=expected_version)
     _flat_release_files(directory)
-    checksum_path = directory / CHECKSUM_FILENAME
-    if verify_checksums and checksum_path.exists():
-        _verify_checksums_if_present(directory)
     return index
-
-
-def write_checksums(release_dir: str | Path) -> Path:
-    """Validate a release and write deterministic checksums for every release file."""
-    directory = Path(release_dir)
-    validate_release(directory, verify_checksums=False)
-    checksum_path = directory / CHECKSUM_FILENAME
-    temporary = directory / f".{CHECKSUM_FILENAME}.{uuid4().hex}.tmp"
-    try:
-        temporary.write_bytes(_checksum_bytes(directory))
-        os.replace(temporary, checksum_path)
-    finally:
-        temporary.unlink(missing_ok=True)
-    return checksum_path
 
 
 def _validate_indexed_release(
@@ -260,18 +239,3 @@ def _flat_release_files(directory: Path) -> list[Path]:
         _require_flat_filename(path.name, "release filename")
         files.append(path)
     return sorted(files, key=lambda path: path.name)
-
-
-def _checksum_bytes(directory: Path) -> bytes:
-    lines = []
-    for path in _flat_release_files(directory):
-        if path.name == CHECKSUM_FILENAME:
-            continue
-        lines.append(f"{sha256(path.read_bytes()).hexdigest()}  {path.name}\n")
-    return "".join(lines).encode()
-
-
-def _verify_checksums_if_present(directory: Path) -> None:
-    checksum_path = directory / CHECKSUM_FILENAME
-    if checksum_path.exists() and checksum_path.read_bytes() != _checksum_bytes(directory):
-        raise ValidationError(f"{CHECKSUM_FILENAME} is stale or malformed")

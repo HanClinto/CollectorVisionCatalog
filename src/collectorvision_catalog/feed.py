@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import quote, unquote, urlparse
 
 from .artifacts import (
+    CatalogDescriptor,
     ValidationError,
     _require_mapping,
     _require_non_empty_string,
@@ -45,6 +46,68 @@ def _version_key(value: Any) -> int:
     if str(version) != value:
         raise ValidationError("feed update keys must use canonical decimal versions")
     return version
+
+
+def _family_name(value: Any) -> str:
+    name = _require_non_empty_string(value, "catalog family")
+    if "/" in name:
+        raise ValidationError("catalog family must not contain '/'")
+    return name
+
+
+def _local_catalog_key(value: Any) -> str:
+    key = _require_non_empty_string(value, "family catalog key")
+    if "/" not in key or key.startswith("/") or key.endswith("/"):
+        raise ValidationError("family catalog key must contain source/game components")
+    return key
+
+
+def _split_catalog_key(value: Any) -> tuple[str, str]:
+    key = _require_non_empty_string(value, "catalog key")
+    family, separator, local_key = key.partition("/")
+    if not separator:
+        raise ValidationError("catalog key must contain family and local components")
+    return _family_name(family), _local_catalog_key(local_key)
+
+
+@dataclass(frozen=True)
+class EmbeddingContract:
+    model: str
+    dimensions: int
+    dtype: str
+    byte_order: str = "little"
+    layout: str = "row-major"
+
+    def to_dict(self) -> dict[str, str | int]:
+        return {
+            "model": self.model,
+            "dimensions": self.dimensions,
+            "dtype": self.dtype,
+            "byte_order": self.byte_order,
+            "layout": self.layout,
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> EmbeddingContract:
+        _exact_keys(
+            payload,
+            {"model", "dimensions", "dtype", "byte_order", "layout"},
+            "embedding contract",
+        )
+        if payload.get("dtype") != "float16":
+            raise ValidationError("embedding dtype must be 'float16'")
+        if payload.get("byte_order") != "little":
+            raise ValidationError("embedding byte_order must be 'little'")
+        if payload.get("layout") != "row-major":
+            raise ValidationError("embedding layout must be 'row-major'")
+        dimensions = _version(payload.get("dimensions"), "embedding dimensions")
+        if dimensions == 0:
+            raise ValidationError("embedding dimensions must be positive")
+        return cls(
+            model=_require_non_empty_string(payload.get("model"), "embedding model"),
+            dimensions=dimensions,
+            dtype="float16",
+        )
 
 
 @dataclass(frozen=True)
@@ -139,7 +202,7 @@ class LayerReference:
 class SnapshotReference:
     version: int
     rows: int
-    manifest: FileReference
+    source_updated_at: str
     recognition: dict[str, FileReference]
     metadata: dict[str, FileReference]
 
@@ -147,7 +210,7 @@ class SnapshotReference:
         return {
             "version": self.version,
             "rows": self.rows,
-            "manifest": self.manifest.to_dict(),
+            "source_updated_at": self.source_updated_at,
             "recognition": {
                 "assets": {
                     key: value.to_dict() for key, value in sorted(self.recognition.items())
@@ -164,14 +227,16 @@ class SnapshotReference:
     def from_dict(cls, payload: Mapping[str, Any]) -> SnapshotReference:
         _exact_keys(
             payload,
-            {"version", "rows", "manifest", "recognition", "metadata"},
+            {"version", "rows", "source_updated_at", "recognition", "metadata"},
             "feed base",
         )
         snapshot = cls(
             version=_version(payload.get("version"), "feed base version"),
             rows=_version(payload.get("rows"), "feed base rows"),
-            manifest=FileReference.from_dict(
-                _require_mapping(payload.get("manifest"), "feed base manifest")
+            source_updated_at=normalize_rfc3339_utc(
+                _require_non_empty_string(
+                    payload.get("source_updated_at"), "feed base source_updated_at"
+                )
             ),
             recognition=_assets_from_dict(
                 _require_mapping(payload.get("recognition"), "feed base recognition"),
@@ -201,16 +266,16 @@ class DeltaReference:
     from_version: int
     to_version: int
     rows: ChangeCounts
+    source_updated_at: str
     recognition: LayerReference
     metadata: LayerReference
-    manifest: FileReference
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "from_version": self.from_version,
             "to_version": self.to_version,
             "rows": self.rows.to_dict(),
-            "manifest": self.manifest.to_dict(),
+            "source_updated_at": self.source_updated_at,
             "recognition": self.recognition.to_dict(),
             "metadata": self.metadata.to_dict(),
         }
@@ -236,7 +301,7 @@ class DeltaReference:
                 "rows",
                 "recognition",
                 "metadata",
-                "manifest",
+                "source_updated_at",
             },
             "feed delta",
         )
@@ -251,6 +316,11 @@ class DeltaReference:
                 _require_mapping(payload.get("rows"), "feed delta rows"),
                 "feed delta rows",
             ),
+            source_updated_at=normalize_rfc3339_utc(
+                _require_non_empty_string(
+                    payload.get("source_updated_at"), "feed update source_updated_at"
+                )
+            ),
             recognition=LayerReference.from_dict(
                 _require_mapping(payload.get("recognition"), "feed delta recognition"),
                 name="feed delta recognition",
@@ -261,9 +331,6 @@ class DeltaReference:
                 name="feed delta metadata",
                 allowed={"records"},
             ),
-            manifest=FileReference.from_dict(
-                _require_mapping(payload.get("manifest"), "feed delta manifest")
-            ),
         )
         _validate_delta_rows(delta)
         return delta
@@ -272,6 +339,7 @@ class DeltaReference:
 @dataclass(frozen=True)
 class CatalogFeedEntry:
     public_name: str
+    descriptor: CatalogDescriptor
     current_version: int
     rows: int
     source_updated_at: str
@@ -281,6 +349,7 @@ class CatalogFeedEntry:
     def to_dict(self) -> dict[str, Any]:
         return {
             "public_name": self.public_name,
+            "descriptor": self.descriptor.to_dict(),
             "current_version": self.current_version,
             "rows": self.rows,
             "source_updated_at": self.source_updated_at,
@@ -297,6 +366,7 @@ class CatalogFeedEntry:
             payload,
             {
                 "public_name",
+                "descriptor",
                 "current_version",
                 "rows",
                 "source_updated_at",
@@ -333,6 +403,9 @@ class CatalogFeedEntry:
             raise ValidationError("feed update chain does not reach current_version")
         entry = cls(
             public_name=public_name,
+            descriptor=CatalogDescriptor.from_dict(
+                _require_mapping(payload.get("descriptor"), "feed catalog descriptor")
+            ),
             current_version=current_version,
             rows=_version(payload.get("rows"), "feed catalog rows"),
             source_updated_at=normalize_rfc3339_utc(
@@ -354,37 +427,78 @@ class CatalogFeedEntry:
 
 
 @dataclass(frozen=True)
-class CatalogFeed:
-    checked_at: str
+class CatalogFamily:
+    embedding: EmbeddingContract
     catalogs: dict[str, CatalogFeedEntry]
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "checked_at": self.checked_at,
+            "embedding": self.embedding.to_dict(),
             "catalogs": {key: value.to_dict() for key, value in sorted(self.catalogs.items())},
         }
 
     @classmethod
-    def from_dict(cls, payload: Mapping[str, Any]) -> CatalogFeed:
-        _exact_keys(payload, {"checked_at", "catalogs"}, "catalog feed")
+    def from_dict(cls, payload: Mapping[str, Any], family_name: str) -> CatalogFamily:
+        _exact_keys(payload, {"embedding", "catalogs"}, f"catalog family {family_name!r}")
         catalogs = {
-            _require_non_empty_string(key, "catalog feed key"): CatalogFeedEntry.from_dict(
-                _require_mapping(value, f"catalog feed {key!r}")
+            _local_catalog_key(key): CatalogFeedEntry.from_dict(
+                _require_mapping(value, f"catalog family {family_name!r} catalog {key!r}")
             )
             for key, value in _require_mapping(
-                payload.get("catalogs"), "catalog feed catalogs"
+                payload.get("catalogs"), f"catalog family {family_name!r} catalogs"
             ).items()
         }
         if not catalogs:
-            raise ValidationError("catalog feed must contain at least one catalog")
+            raise ValidationError("catalog family must contain at least one catalog")
         public_names = [entry.public_name for entry in catalogs.values()]
         if len(public_names) != len(set(public_names)):
-            raise ValidationError("catalog feed public names must be unique")
+            raise ValidationError("catalog family public names must be unique")
+        return cls(
+            embedding=EmbeddingContract.from_dict(
+                _require_mapping(payload.get("embedding"), "embedding contract")
+            ),
+            catalogs=catalogs,
+        )
+
+
+@dataclass(frozen=True)
+class CatalogFeed:
+    checked_at: str
+    families: dict[str, CatalogFamily]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "checked_at": self.checked_at,
+            "families": {
+                key: value.to_dict() for key, value in sorted(self.families.items())
+            },
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> CatalogFeed:
+        _exact_keys(payload, {"checked_at", "families"}, "catalog feed")
+        families = {
+            _family_name(key): CatalogFamily.from_dict(
+                _require_mapping(value, f"catalog family {key!r}"), key
+            )
+            for key, value in _require_mapping(
+                payload.get("families"), "catalog feed families"
+            ).items()
+        }
+        if not families:
+            raise ValidationError("catalog feed must contain at least one family")
+        public_names = [
+            entry.public_name
+            for family in families.values()
+            for entry in family.catalogs.values()
+        ]
+        if len(public_names) != len(set(public_names)):
+            raise ValidationError("catalog feed public names must be globally unique")
         return cls(
             checked_at=normalize_rfc3339_utc(
                 _require_non_empty_string(payload.get("checked_at"), "catalog feed checked_at")
             ),
-            catalogs=catalogs,
+            families=families,
         )
 
 
@@ -397,10 +511,12 @@ def update_catalog_feed(
     """Build the active feed from each catalog's complete ordered manifest history."""
     if not catalog_histories:
         raise ValidationError("catalog feed must contain at least one catalog")
-    entries: dict[str, CatalogFeedEntry] = {}
+    family_entries: dict[str, dict[str, CatalogFeedEntry]] = {}
+    family_contracts: dict[str, EmbeddingContract] = {}
     public_names: set[str] = set()
     for catalog_key, history in sorted(catalog_histories.items()):
         key = _require_non_empty_string(catalog_key, "catalog feed key")
+        family_name, local_key = _split_catalog_key(key)
         records = list(history)
         if not records:
             raise ValidationError(f"catalog {key!r} has no manifest history")
@@ -415,7 +531,7 @@ def update_catalog_feed(
                 raise ValidationError("catalog manifest previous_version is inconsistent")
             if index and manifest.public_name != manifests[0].public_name:
                 raise ValidationError("catalog public_name changed within its history")
-            _validate_manifest_files(Path(records[index][0]), manifest)
+            _validate_receipt_assets(Path(records[index][0]), manifest)
         public_name = manifests[0].public_name
         if public_name in public_names:
             raise ValidationError("catalog feed public names must be unique")
@@ -427,11 +543,10 @@ def update_catalog_feed(
         if base_index is None:
             raise ValidationError(f"catalog {key!r} has no base")
         base_manifest = manifests[base_index]
-        base_path = Path(records[base_index][0])
         base = SnapshotReference(
             version=base_manifest.version,
             rows=base_manifest.base.rows,
-            manifest=_file_reference(base_path, public_name, base_manifest.version, base_path.name),
+            source_updated_at=base_manifest.source_revision.updated_at,
             recognition=_asset_references(
                 public_name, base_manifest.version, base_manifest.base.recognition
             ),
@@ -443,12 +558,13 @@ def update_catalog_feed(
         if base_manifest.delta is not None:
             delta_indexes.insert(0, base_index)
         updates = tuple(
-            _delta_reference(Path(records[index][0]), manifests[index]) for index in delta_indexes
+            _delta_reference(manifests[index]) for index in delta_indexes
         )
         current = manifests[-1]
-        entries[key] = CatalogFeedEntry.from_dict(
+        entry = CatalogFeedEntry.from_dict(
             CatalogFeedEntry(
                 public_name=public_name,
+                descriptor=current.descriptor,
                 current_version=current.version,
                 rows=current.rows,
                 source_updated_at=current.source_revision.updated_at,
@@ -456,8 +572,27 @@ def update_catalog_feed(
                 updates={update.to_version: update for update in updates},
             ).to_dict()
         )
+        contract = EmbeddingContract(
+            model=current.embedding_model,
+            dimensions=current.dim,
+            dtype=current.dtype,
+        )
+        existing_contract = family_contracts.setdefault(family_name, contract)
+        if existing_contract != contract:
+            raise ValidationError("catalog family embedding contracts must be identical")
+        family_entries.setdefault(family_name, {})[local_key] = entry
+    families = {
+        family_name: CatalogFamily(
+            embedding=family_contracts[family_name],
+            catalogs=catalogs,
+        )
+        for family_name, catalogs in family_entries.items()
+    }
     return CatalogFeed.from_dict(
-        CatalogFeed(checked_at=normalize_rfc3339_utc(checked_at), catalogs=entries).to_dict()
+        CatalogFeed(
+            checked_at=normalize_rfc3339_utc(checked_at),
+            families=families,
+        ).to_dict()
     )
 
 
@@ -482,19 +617,6 @@ def _url(public_name: str, version: int, relative_path: str) -> str:
     return f"{PUBLIC_BASE_URL}/{quote(public_name, safe='')}/version/{version}/{suffix}"
 
 
-def _file_reference(
-    path: Path, public_name: str, version: int, relative_path: str
-) -> FileReference:
-    payload = path.read_bytes()
-    return FileReference.from_dict(
-        {
-            "url": _url(public_name, version, relative_path),
-            "sha256": sha256(payload).hexdigest(),
-            "size": len(payload),
-        }
-    )
-
-
 def _asset_references(
     public_name: str, version: int, assets: Mapping[str, PublishedAsset]
 ) -> dict[str, FileReference]:
@@ -510,14 +632,14 @@ def _asset_references(
     }
 
 
-def _delta_reference(path: Path, manifest: CatalogVersionManifest) -> DeltaReference:
+def _delta_reference(manifest: CatalogVersionManifest) -> DeltaReference:
     if manifest.delta is None:
         raise ValidationError("catalog history after its selected base must contain deltas")
     return DeltaReference(
         from_version=manifest.delta.from_version,
         to_version=manifest.version,
         rows=manifest.delta.rows,
-        manifest=_file_reference(path, manifest.public_name, manifest.version, path.name),
+        source_updated_at=manifest.source_revision.updated_at,
         recognition=LayerReference(
             rows=manifest.delta.recognition.rows,
             assets=_asset_references(
@@ -537,21 +659,14 @@ def _delta_reference(path: Path, manifest: CatalogVersionManifest) -> DeltaRefer
     )
 
 
-def _validate_manifest_files(path: Path, manifest: CatalogVersionManifest) -> None:
-    try:
-        disk_manifest = CatalogVersionManifest.from_dict(
-            _require_mapping(json.loads(path.read_text(encoding="utf-8")), "catalog manifest")
-        )
-    except (OSError, json.JSONDecodeError) as error:
-        raise ValidationError(f"cannot read catalog manifest {path}") from error
-    if disk_manifest != manifest:
-        raise ValidationError("manifest file does not match the supplied manifest")
+def _validate_receipt_assets(path: Path, manifest: CatalogVersionManifest) -> None:
+    version_dir = path if path.is_dir() else path.parent
     assets = [*(manifest.base.assets if manifest.base is not None else {}).values()]
     if manifest.delta is not None:
         assets.extend(manifest.delta.recognition.assets.values())
         assets.extend(manifest.delta.metadata.assets.values())
     for asset in assets:
-        asset_path = path.parent / asset.path
+        asset_path = version_dir / asset.path
         try:
             payload = asset_path.read_bytes()
         except OSError as error:
@@ -561,18 +676,16 @@ def _validate_manifest_files(path: Path, manifest: CatalogVersionManifest) -> No
 
 
 def _validate_reference_urls(entry: CatalogFeedEntry) -> None:
-    stages: list[tuple[int, FileReference, Mapping[str, FileReference]]] = [
-        (entry.base.version, entry.base.manifest, entry.base.assets),
+    stages: list[tuple[int, Mapping[str, FileReference]]] = [
+        (entry.base.version, entry.base.assets),
         *(
-            (update.to_version, update.manifest, update.assets)
+            (update.to_version, update.assets)
             for update in entry.updates.values()
         ),
     ]
-    for version, manifest, assets in stages:
+    for version, assets in stages:
         expected = f"{PUBLIC_BASE_URL}/{entry.public_name}/version/{version}/"
-        if not manifest.url.startswith(expected) or any(
-            not reference.url.startswith(expected) for reference in assets.values()
-        ):
+        if any(not reference.url.startswith(expected) for reference in assets.values()):
             raise ValidationError("feed file URL does not match its catalog stage")
 
 

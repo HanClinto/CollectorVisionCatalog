@@ -63,6 +63,8 @@ jobs:
 
           root = Path(os.environ["ROOT"])
           for source in Path("release-assets").glob("*/*"):
+              if source.name == "audit.json":
+                  continue
               public_name, version, relative = source.name.split(".", 2)
               version_number = version.removeprefix("v")
               if relative.startswith(("base.", "delta-from-")):

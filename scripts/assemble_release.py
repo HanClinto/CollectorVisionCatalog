@@ -8,11 +8,16 @@ from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 
-from collectorvision_catalog import ValidationError, max_source_updated_at
+from collectorvision_catalog import (
+    ValidationError,
+    assemble_catalog_release,
+    load_catalog_version_manifest,
+    max_source_updated_at,
+    validate_catalog_release,
+)
 from collectorvision_catalog.release import (
     assemble_seed_release,
     validate_release,
-    write_checksums,
 )
 
 
@@ -25,10 +30,38 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     assemble.add_argument("--output-dir", type=Path, required=True)
     assemble.add_argument("--version", required=True)
 
+    audit = subparsers.add_parser(
+        "assemble-audit",
+        help="assemble public assets and one release-wide audit from private receipts",
+    )
+    audit.add_argument(
+        "--publication",
+        action="append",
+        nargs=3,
+        required=True,
+        metavar=("CATALOG_KEY", "VERSION_ROOT", "RECEIPT"),
+    )
+    audit.add_argument(
+        "--input",
+        action="append",
+        nargs=2,
+        required=True,
+        metavar=("NAME", "PATH"),
+    )
+    audit.add_argument("--output-dir", type=Path, required=True)
+    audit.add_argument("--tag", required=True)
+    audit.add_argument("--published-at", required=True)
+    audit.add_argument("--repository", required=True)
+    audit.add_argument("--commit", required=True)
+
     validate = subparsers.add_parser("validate", help="validate an existing release")
     validate.add_argument("--release-dir", type=Path, required=True)
     validate.add_argument("--version")
-    validate.add_argument("--write-checksums", action="store_true")
+    validate_audit = subparsers.add_parser(
+        "validate-audit",
+        help="validate a public release against its audit",
+    )
+    validate_audit.add_argument("--release-dir", type=Path, required=True)
     status = subparsers.add_parser(
         "source-status",
         help="fetch enabled source revisions without downloading catalog rows",
@@ -42,6 +75,29 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
     if args.command == "assemble":
         assemble_seed_release(args.input_dir, args.output_dir, args.version)
+    elif args.command == "assemble-audit":
+        publications = {}
+        for catalog_key, version_root, receipt_path in args.publication:
+            if catalog_key in publications:
+                raise ValidationError(f"duplicate publication {catalog_key!r}")
+            publications[catalog_key] = (
+                Path(version_root),
+                load_catalog_version_manifest(receipt_path),
+            )
+        inputs = {}
+        for name, path in args.input:
+            if name in inputs:
+                raise ValidationError(f"duplicate audit input {name!r}")
+            inputs[name] = Path(path)
+        assemble_catalog_release(
+            publications,
+            args.output_dir,
+            tag=args.tag,
+            published_at=args.published_at,
+            repository=args.repository,
+            commit=args.commit,
+            inputs=inputs,
+        )
     elif args.command == "source-status":
         updater = runpy.run_path(str(Path(__file__).with_name("update_catalogs.py")))
         configs = [config for config in updater["load_config"](args.config) if config.enabled]
@@ -78,12 +134,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.output is not None:
             args.output.write_text(rendered, encoding="utf-8")
         print(rendered, end="")
-    elif args.write_checksums:
-        validate_release(args.release_dir, expected_version=args.version)
-        write_checksums(args.release_dir)
+    elif args.command == "validate":
         validate_release(args.release_dir, expected_version=args.version)
     else:
-        validate_release(args.release_dir, expected_version=args.version)
+        validate_catalog_release(args.release_dir)
     return 0
 
 

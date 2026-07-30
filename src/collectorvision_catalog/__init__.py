@@ -20,11 +20,20 @@ from .artifacts import (
     primary_identifier_for_provider,
     validate_artifacts,
 )
+from .audit import (
+    AUDIT_FILENAME,
+    ReleaseAudit,
+    assemble_catalog_release,
+    load_release_audit,
+    validate_catalog_release,
+)
 from .feed import (
     FEED_FILENAME,
+    CatalogFamily,
     CatalogFeed,
     CatalogFeedEntry,
     DeltaReference,
+    EmbeddingContract,
     FileReference,
     LayerReference,
     SnapshotReference,
@@ -38,7 +47,7 @@ from .publication import (
     load_catalog_version_manifest,
     publish_catalog_version,
 )
-from .release import assemble_seed_release, validate_release, write_checksums
+from .release import assemble_seed_release, validate_release
 from .sources.snapshots import SourceSnapshot
 from .versioning import (
     CatalogVersionPlan,
@@ -48,6 +57,7 @@ from .versioning import (
 )
 
 __all__ = [
+    "AUDIT_FILENAME",
     "AssetIntegrityError",
     "CatalogBuild",
     "CatalogDescriptor",
@@ -59,21 +69,26 @@ __all__ = [
     "CatalogVersionManifest",
     "CatalogFeed",
     "CatalogFeedEntry",
+    "CatalogFamily",
     "DeltaReference",
+    "EmbeddingContract",
     "FEED_FILENAME",
     "FileReference",
     "LayerReference",
     "SnapshotReference",
     "RecognitionRow",
+    "ReleaseAudit",
     "SourceRevision",
     "SourceSnapshot",
     "ValidationError",
     "apply_delta",
     "assemble_seed_release",
+    "assemble_catalog_release",
     "build_catalog",
     "catalog_row_key",
     "catalog_key_to_slug",
     "load_catalog_build",
+    "load_release_audit",
     "load_catalog_feed",
     "load_catalog_index",
     "load_catalog_version_manifest",
@@ -86,10 +101,10 @@ __all__ = [
     "publish_catalog_version",
     "max_source_updated_at",
     "validate_artifacts",
+    "validate_catalog_release",
     "validate_public_name",
     "validate_release",
     "update_catalog_feed",
-    "write_checksums",
     "write_catalog_index",
     "write_catalog_feed",
     "version_root",

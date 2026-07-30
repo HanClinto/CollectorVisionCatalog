@@ -8,7 +8,6 @@ from conftest import TrackingEmbedder, TrackingImageLoader, build_test_catalog, 
 from collectorvision_catalog import (
     CatalogVersionManifest,
     ValidationError,
-    load_catalog_version_manifest,
     plan_catalog_version,
     publish_catalog_version,
 )
@@ -52,8 +51,8 @@ def test_initial_version_publishes_only_readable_base_paths(workspace: Path) -> 
         plan_catalog_version(None),
     )
 
-    assert path == workspace / "public/scryfall-mtg/version/0/manifest.json"
-    assert path.read_text().startswith('{\n  "catalog_key":')
+    assert path == workspace / "public/scryfall-mtg/version/0"
+    assert not (path / "manifest.json").exists()
     assert manifest.delta is None
     assert manifest.base is not None
     assert manifest.base.rows == 1
@@ -67,8 +66,8 @@ def test_initial_version_publishes_only_readable_base_paths(workspace: Path) -> 
         "base/metadata.jsonl.gz",
     }
     for asset in manifest.base.assets.values():
-        assert (path.parent / asset.path).is_file()
-    assert load_catalog_version_manifest(path) == manifest
+        assert (path / asset.path).is_file()
+    assert CatalogVersionManifest.from_dict(manifest.to_dict()) == manifest
 
 
 def test_public_manifest_requires_positive_base_rows(workspace: Path) -> None:
@@ -144,8 +143,8 @@ def test_incremental_version_publishes_only_delta(workspace: Path) -> None:
     assert manifest.delta.metadata.rows == 1
     assert set(manifest.delta.recognition.assets) == {"embeddings", "identifiers"}
     assert set(manifest.delta.metadata.assets) == {"records"}
-    assert not (path.parent / "base").exists()
-    assert (path.parent / "delta-from-0/embeddings.f16.gz").is_file()
+    assert not (path / "base").exists()
+    assert (path / "delta-from-0/embeddings.f16.gz").is_file()
 
 
 def test_routine_and_hard_checkpoints_have_distinct_routes(workspace: Path) -> None:
@@ -232,7 +231,7 @@ def test_delete_only_delta_does_not_require_embeddings(workspace: Path) -> None:
     assert manifest.delta.metadata.rows == 0
     assert set(manifest.delta.recognition.assets) == {"identifiers"}
     assert manifest.delta.metadata.assets == {}
-    assert load_catalog_version_manifest(path) == manifest
+    assert CatalogVersionManifest.from_dict(manifest.to_dict()) == manifest
 
 
 def test_metadata_only_delta_omits_recognition_assets(workspace: Path) -> None:
@@ -275,7 +274,7 @@ def test_metadata_only_delta_omits_recognition_assets(workspace: Path) -> None:
     assert manifest.delta.recognition.assets == {}
     assert manifest.delta.metadata.rows == 1
     assert set(manifest.delta.metadata.assets) == {"records"}
-    assert load_catalog_version_manifest(path) == manifest
+    assert CatalogVersionManifest.from_dict(manifest.to_dict()) == manifest
 
 
 def test_publication_rejects_tampered_builder_asset(workspace: Path) -> None:
