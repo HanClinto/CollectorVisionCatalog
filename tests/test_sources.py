@@ -83,10 +83,10 @@ def test_normalize_scryfall_card_faces_and_identifiers() -> None:
     assert rows[0].finishes == ("foil", "nonfoil")
     assert rows[0].minimal_record()["finishes"] == ["foil", "nonfoil"]
     assert "finishes" not in rows[0].metadata
-    assert rows[0].metadata["cmc"] == 2.0
+    assert rows[0].metadata["cmc"] == 2
     assert rows[0].metadata["colors"] == ["W"]
     assert rows[1].metadata == {
-        "cmc": 4.0,
+        "cmc": 4,
         "collector_number": "15",
         "colors": ["W", "U"],
         "lang": "en",
@@ -95,6 +95,20 @@ def test_normalize_scryfall_card_faces_and_identifiers() -> None:
         "set": "neo",
         "set_name": "Neo Genesis",
     }
+
+
+def test_scryfall_floors_fractional_joke_card_cmc() -> None:
+    row = normalize_scryfall_card(
+        {
+            "id": CARD_ID,
+            "name": "Little Joke Card",
+            "cmc": 0.5,
+            "image_uris": {"png": "https://img/card.png"},
+        }
+    )[0]
+
+    assert row.metadata["cmc"] == 0
+    assert isinstance(row.metadata["cmc"], int)
 
 
 def test_scryfall_image_revision_changes_fingerprint() -> None:

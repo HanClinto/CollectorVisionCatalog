@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Mapping
 from hashlib import sha256
 from typing import Any
@@ -85,8 +86,19 @@ def _metadata(
     for field in ("cmc", "colors"):
         value = face.get(field) if face is not None and field in face else card.get(field)
         if value is not None:
-            metadata[field] = value
+            metadata[field] = _mana_value(value) if field == "cmc" else value
     return metadata
+
+
+def _mana_value(value: Any) -> int:
+    if (
+        not isinstance(value, (int, float))
+        or isinstance(value, bool)
+        or not math.isfinite(value)
+        or value < 0
+    ):
+        raise ValidationError("cmc must be a non-negative finite number")
+    return int(value)
 
 
 def _finishes(value: Any) -> tuple[str, ...]:

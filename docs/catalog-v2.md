@@ -250,7 +250,8 @@ references are tracked in
 
 The MTG adapter uses Scryfall bulk data. Each available face is a separate
 recognition row. The Scryfall card UUID is the primary `id`; Oracle IDs and
-available TCGplayer IDs are peer identifiers.
+available TCGplayer IDs are peer identifiers. Metadata stores `cmc` as an
+integer, flooring fractional values used by joke cards.
 
 The selected bulk-data entry supplies the source type, bulk identity,
 `jsonl_download_uri`, and update timestamp. The bulk JSONL is streamed as a
