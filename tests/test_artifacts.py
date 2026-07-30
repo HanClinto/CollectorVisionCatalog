@@ -200,6 +200,7 @@ def test_base_rows_are_minimal_and_line_aligned(workspace: Path) -> None:
             "memory://front",
             "front-fingerprint",
             identifiers={"peer": "peer-1"},
+            finishes=("foil", "nonfoil"),
             metadata={"name": "Front"},
         ),
         make_row(
@@ -224,7 +225,11 @@ def test_base_rows_are_minimal_and_line_aligned(workspace: Path) -> None:
     assert _read_gzip_jsonl(
         workspace / "aligned" / build.manifest.assets["identifiers"].filename
     ) == [
-        {"id": "card", "identifiers": {"peer": "peer-1"}},
+        {
+            "id": "card",
+            "identifiers": {"peer": "peer-1"},
+            "finishes": ["foil", "nonfoil"],
+        },
         {"id": "card", "identifiers": {"peer": "peer-1"}, "face_index": 1},
     ]
     assert _read_gzip_jsonl(
@@ -242,6 +247,46 @@ def test_base_rows_are_minimal_and_line_aligned(workspace: Path) -> None:
             "image_fingerprint": "back-fingerprint",
         },
     ]
+    loaded = load_catalog_build(
+        workspace / "aligned" / manifest_filename_for_catalog(CATALOG_KEY)
+    )
+    assert loaded.rows[0].finishes == ("foil", "nonfoil")
+    assert loaded.rows[1].finishes == ()
+
+
+@pytest.mark.parametrize(
+    "finishes",
+    [
+        "foil",
+        ["foil", "foil"],
+        [""],
+    ],
+)
+def test_recognition_records_reject_invalid_finishes(finishes: object) -> None:
+    with pytest.raises(ValidationError, match="finishe?s?"):
+        RecognitionRow.from_artifact_records(
+            {"id": "card", "identifiers": {}, "finishes": finishes},
+            {
+                "image_url": "memory://card",
+                "image_fingerprint": "fingerprint",
+            },
+            provider="test-source",
+        )
+
+
+def test_recognition_row_preserves_positional_metadata_argument() -> None:
+    row = RecognitionRow(
+        "test-source",
+        "card",
+        {},
+        "memory://card",
+        "fingerprint",
+        0,
+        {"name": "Card"},
+    )
+
+    assert row.metadata == {"name": "Card"}
+    assert row.finishes == ()
 
 
 def test_reuses_previous_embeddings_on_metadata_only_change(workspace: Path) -> None:
@@ -294,6 +339,61 @@ def test_reuses_previous_embeddings_on_metadata_only_change(workspace: Path) -> 
             "metadata": {"name": "Alpha", "rarity": "rare"},
         }
     ]
+
+
+def test_finish_only_change_produces_recognition_delta(workspace: Path) -> None:
+    image_map = {"memory://alpha": (255, 0, 0)}
+    rows_v1 = [
+        make_row(
+            "alpha",
+            "memory://alpha",
+            "fp-alpha",
+            finishes=("nonfoil",),
+            metadata={"name": "Alpha"},
+        )
+    ]
+    _, build_dir, _, _ = _build_initial_catalog(workspace, rows_v1, image_map)
+    previous = load_catalog_build(build_dir / manifest_filename_for_catalog(CATALOG_KEY))
+    rows_v2 = [
+        make_row(
+            "alpha",
+            "memory://alpha",
+            "fp-alpha",
+            finishes=("foil", "nonfoil"),
+            metadata={"name": "Alpha"},
+        )
+    ]
+    build = build_catalog(
+        rows_v2,
+        embedder=TrackingEmbedder(),
+        image_loader=TrackingImageLoader(image_map),
+        output_dir=workspace / "finish-only",
+        catalog_key=CATALOG_KEY,
+        version="v2",
+        embedding_model=EMBEDDING_MODEL,
+        previous_build=previous,
+    )
+    manifest_path = workspace / "finish-only" / manifest_filename_for_catalog(CATALOG_KEY)
+
+    assert _read_gzip_jsonl(
+        workspace / "finish-only" / build.manifest.assets["identifiers_delta"].filename
+    ) == [
+        {
+            "embedding_index": 0,
+            "op": "upsert",
+            "record": {
+                "finishes": ["foil", "nonfoil"],
+                "id": "alpha",
+                "identifiers": {},
+            },
+            "state": {
+                "image_fingerprint": "fp-alpha",
+                "image_url": "memory://alpha",
+            },
+        }
+    ]
+    assert "metadata_delta" not in build.manifest.assets
+    assert apply_delta(previous, manifest_path).rows[0].finishes == ("foil", "nonfoil")
 
 
 def test_seed_embeddings_reuse_initial_rows_and_keep_artifacts_valid(workspace: Path) -> None:

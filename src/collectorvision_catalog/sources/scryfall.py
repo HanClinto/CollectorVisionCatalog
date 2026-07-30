@@ -22,7 +22,7 @@ def normalize_scryfall_card(card: Mapping[str, Any]) -> list[RecognitionRow]:
     ):
         if (value := card.get(source_name)) not in (None, ""):
             identifiers[field_name] = _require_positive_decimal(value, source_name)
-    metadata = {
+    base_metadata = {
         field: value
         for field in (
             "name",
@@ -31,10 +31,10 @@ def normalize_scryfall_card(card: Mapping[str, Any]) -> list[RecognitionRow]:
             "lang",
             "collector_number",
             "rarity",
-            "finishes",
         )
         if (value := card.get(field)) is not None
     }
+    finishes = _finishes(card.get("finishes"))
     rows: list[RecognitionRow] = []
     card_faces = card.get("card_faces") or []
     if isinstance(card_faces, list) and card_faces:
@@ -52,7 +52,8 @@ def normalize_scryfall_card(card: Mapping[str, Any]) -> list[RecognitionRow]:
                     image_url=image_url,
                     image_fingerprint=_fingerprint(image_url),
                     face_index=index,
-                    metadata=dict(metadata),
+                    finishes=finishes,
+                    metadata=_metadata(base_metadata, card, face_payload),
                 )
             )
         if rows:
@@ -67,9 +68,36 @@ def normalize_scryfall_card(card: Mapping[str, Any]) -> list[RecognitionRow]:
             identifiers=dict(sorted(identifiers.items())),
             image_url=image_url,
             image_fingerprint=_fingerprint(image_url),
-            metadata=metadata,
+            finishes=finishes,
+            metadata=_metadata(base_metadata, card),
         )
     ]
+
+
+def _metadata(
+    base: Mapping[str, Any],
+    card: Mapping[str, Any],
+    face: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    metadata = dict(base)
+    if face is not None and (name := face.get("name")) is not None:
+        metadata["name"] = name
+    for field in ("cmc", "colors"):
+        value = face.get(field) if face is not None and field in face else card.get(field)
+        if value is not None:
+            metadata[field] = value
+    return metadata
+
+
+def _finishes(value: Any) -> tuple[str, ...]:
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise ValidationError("finishes must be a list")
+    finishes = tuple(sorted(_require_string(item, "finish") for item in value))
+    if len(finishes) != len(set(finishes)):
+        raise ValidationError("finishes must not contain duplicates")
+    return finishes
 
 
 def _preferred_image_url(image_uris: Any) -> str | None:

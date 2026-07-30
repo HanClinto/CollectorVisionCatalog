@@ -66,7 +66,7 @@ model.
 | Catalog v1 | Catalog v2 |
 | --- | --- |
 | One convenient NPZ file | Compact FP16 recognition plus compressed JSONL |
-| Card IDs with minimal built-in data | Optional names, sets, languages, finishes, and other metadata |
+| Card IDs with minimal built-in data | Recognition-ready finishes plus optional names, sets, colors, and other metadata |
 | Updates replace the whole file | Updates normally download only changed rows |
 | Great for custom-built catalogs | Great for hosted, bandwidth-conscious applications |
 

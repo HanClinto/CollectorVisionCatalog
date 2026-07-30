@@ -27,7 +27,7 @@ def make_row(product_id: str, modified_on: str, face_index: int = 0) -> Recognit
         ),
         image_fingerprint=f"fp-{modified_on}",
         face_index=face_index,
-        metadata={"name": product_id, "modified_on": modified_on},
+        metadata={"name": product_id},
     )
 
 

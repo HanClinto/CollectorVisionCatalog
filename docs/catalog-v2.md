@@ -62,7 +62,8 @@ A recognition record has this logical shape:
     "scryfall_oracle": "11111111-1111-1111-1111-111111111111",
     "tcgplayer_product": "12345"
   },
-  "face_index": 1
+  "face_index": 1,
+  "finishes": ["foil", "nonfoil"]
 }
 ```
 
@@ -83,6 +84,10 @@ back face. A client that needs a globally unique map key can derive
 `<provider>:<id>` for the front face and `<provider>:<id>:face:<N>` for
 additional faces. The derived key is not stored in public rows. Genuine
 per-face names belong in optional metadata, not recognition records.
+
+`finishes` is an optional recognition-layer attribute because applications may
+need to filter candidate printings during identification. Values use
+Scryfall-compatible terms such as `nonfoil`, `foil`, `etched`, and `glossy`.
 
 The matrix is deterministic gzip-compressed raw little-endian, row-major FP16,
 not NPZ. Raw FP16 is a shared substrate for NumPy and browsers; NPZ is
@@ -114,13 +119,13 @@ recognition never download it. Common fields include:
 - collector number;
 - rarity;
 - language;
-- available finishes.
+- converted mana cost (`cmc`);
+- face color (`colors`, not color identity).
 
 ### Normalized physical attributes
 
-`finishes` is the canonical metadata field for available physical finishes,
-following Scryfall's terminology. Values are source-normalized strings such as
-`nonfoil`, `foil`, `etched`, and `glossy`. A finish is distinct from:
+`finishes` is the canonical recognition field for available physical finishes.
+A finish is distinct from:
 
 - `language`, which identifies the language of a specific printing;
 - marketplace condition, which does not change recognition identity;

@@ -207,6 +207,7 @@ class RecognitionRow:
     image_fingerprint: str
     face_index: int = 0
     metadata: dict[str, JSONValue] | None = None
+    finishes: tuple[str, ...] = ()
 
     @property
     def key(self) -> str:
@@ -219,6 +220,8 @@ class RecognitionRow:
         }
         if self.face_index:
             record["face_index"] = self.face_index
+        if self.finishes:
+            record["finishes"] = list(self.finishes)
         return record
 
     def state_record(self) -> StateRecord:
@@ -236,6 +239,7 @@ class RecognitionRow:
             image_url=self.image_url,
             image_fingerprint=self.image_fingerprint,
             face_index=self.face_index,
+            finishes=self.finishes,
             metadata=metadata,
         )
 
@@ -248,7 +252,7 @@ class RecognitionRow:
         provider: str,
         metadata: Mapping[str, Any] | None = None,
     ) -> RecognitionRow:
-        allowed_fields = {"id", "identifiers", "face_index"}
+        allowed_fields = {"id", "identifiers", "face_index", "finishes"}
         _require_allowed_fields(
             minimal_payload,
             required={"id", "identifiers"},
@@ -276,6 +280,7 @@ class RecognitionRow:
             raise ValidationError("face_index must be a non-negative integer")
         if face_index == 0 and "face_index" in minimal_payload:
             raise ValidationError("recognition record must omit face_index for face 0")
+        finishes = _normalize_finishes(minimal_payload.get("finishes", []))
         key = catalog_row_key(provider, primary_id, face_index)
         state = state_payload if isinstance(state_payload, StateRecord) else StateRecord.from_dict(
             state_payload, key=key
@@ -292,6 +297,7 @@ class RecognitionRow:
             image_url=state.image_url,
             image_fingerprint=state.image_fingerprint,
             face_index=face_index,
+            finishes=finishes,
             metadata=normalized_metadata,
         )
 
@@ -1478,6 +1484,17 @@ def _identity_component(value: Any, name: str) -> str:
     if ":" in component:
         raise ValidationError(f"{name} must not contain ':'")
     return component
+
+
+def _normalize_finishes(value: Any) -> tuple[str, ...]:
+    if not isinstance(value, list):
+        raise ValidationError("finishes must be a list")
+    finishes = tuple(
+        sorted(_require_non_empty_string(item, "finish") for item in value)
+    )
+    if len(finishes) != len(set(finishes)):
+        raise ValidationError("finishes must not contain duplicates")
+    return finishes
 
 
 def _require_non_empty_string(value: Any, name: str) -> str:

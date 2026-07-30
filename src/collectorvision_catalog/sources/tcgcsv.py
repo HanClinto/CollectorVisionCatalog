@@ -39,8 +39,6 @@ def normalize_tcgcsv_product(
         if category_id is not None:
             identifiers["tcgplayer_category"] = str(category_id)
     metadata: dict[str, Any] = {"name": product_name}
-    if modified_on := _lookup(product, "modifiedOn", "modified_on"):
-        metadata["modified_on"] = str(modified_on)
     if group is not None and (group_name := _lookup(group, "name", "groupName")) is not None:
         metadata["set"] = str(group_name)
     if (

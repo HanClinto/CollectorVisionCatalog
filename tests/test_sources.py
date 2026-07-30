@@ -42,9 +42,13 @@ def test_normalize_scryfall_card_faces_and_identifiers() -> None:
         "collector_number": "15",
         "rarity": "rare",
         "finishes": ["nonfoil", "foil"],
+        "cmc": 4.0,
+        "colors": ["W", "U"],
         "card_faces": [
             {
                 "name": "Front Face",
+                "cmc": 2.0,
+                "colors": ["W"],
                 "image_uris": {
                     "normal": "https://img/front-normal.png",
                     "png": "https://img/front.png",
@@ -76,11 +80,17 @@ def test_normalize_scryfall_card_faces_and_identifiers() -> None:
         "tcgplayer_etched_product": "2002",
         "tcgplayer_product": "1001",
     }
+    assert rows[0].finishes == ("foil", "nonfoil")
+    assert rows[0].minimal_record()["finishes"] == ["foil", "nonfoil"]
+    assert "finishes" not in rows[0].metadata
+    assert rows[0].metadata["cmc"] == 2.0
+    assert rows[0].metadata["colors"] == ["W"]
     assert rows[1].metadata == {
+        "cmc": 4.0,
         "collector_number": "15",
-        "finishes": ["nonfoil", "foil"],
+        "colors": ["W", "U"],
         "lang": "en",
-        "name": "Sample Card",
+        "name": "Back Face",
         "rarity": "rare",
         "set": "neo",
         "set_name": "Neo Genesis",
@@ -97,6 +107,26 @@ def test_scryfall_image_revision_changes_fingerprint() -> None:
     card["image_uris"]["png"] = "https://cards.scryfall.io/png/front/a/b/card.png?200"
     second = normalize_scryfall_card(card)[0]
     assert first.image_fingerprint != second.image_fingerprint
+
+
+@pytest.mark.parametrize(
+    "finishes",
+    [
+        "foil",
+        ["foil", "foil"],
+        [" "],
+    ],
+)
+def test_scryfall_rejects_invalid_finishes(finishes: object) -> None:
+    with pytest.raises(ValidationError, match="finishe?s?"):
+        normalize_scryfall_card(
+            {
+                "id": CARD_ID,
+                "name": "Sample Card",
+                "finishes": finishes,
+                "image_uris": {"png": "https://img/card.png"},
+            }
+        )
 
 
 def test_normalize_tcgcsv_product_images_and_filtering() -> None:
@@ -175,7 +205,7 @@ def test_tcgcsv_product_revision_changes_image_fingerprint() -> None:
     product["modifiedOn"] = "2026-05-02T00:00:00"
     second = normalize_tcgcsv_product(product)[0]
     assert first.image_fingerprint != second.image_fingerprint
-    assert second.metadata["modified_on"] == "2026-05-02T00:00:00"
+    assert "modified_on" not in second.metadata
 
 
 def test_tcgcsv_product_without_images_is_skipped() -> None:
