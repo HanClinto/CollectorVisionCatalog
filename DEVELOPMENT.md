@@ -18,8 +18,8 @@ implemented. The remaining Catalog v2 cutover work is:
    catalog-local contract.
 
 The builder now emits compact primary `id` plus optional `face_index` records
-with line-aligned metadata. The currently published beta assets still use the
-prior row layout and will be regenerated after the remaining contract review.
+with line-aligned metadata. The published historical beta checkpoints have been
+rebuilt with this active contract rather than converted from earlier artifacts.
 
 Catalog v2 is unreleased, so discarded prototypes do not require compatibility
 aliases or fallback parsers. Catalog v1 must remain unchanged.
