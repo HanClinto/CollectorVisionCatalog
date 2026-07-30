@@ -659,24 +659,29 @@ def test_seed_embeddings_reject_invalid_vectors(
         )
 
 
-def test_seed_embeddings_cannot_be_combined_with_previous_build(workspace: Path) -> None:
-    rows = [make_row("alpha", "memory://alpha", "fp-alpha", metadata={"name": "Alpha"})]
+def test_seed_embeddings_can_supply_changed_rows_with_previous_build(workspace: Path) -> None:
+    rows = [make_row("alpha", "memory://alpha", "fp-old", metadata={"name": "Alpha"})]
     image_map = {"memory://alpha": (255, 0, 0)}
     _, build_dir, _, _ = _build_initial_catalog(workspace, rows, image_map)
     previous = load_catalog_build(build_dir / manifest_filename_for_catalog(CATALOG_KEY))
 
-    with pytest.raises(ValidationError, match="seed_embeddings cannot be combined"):
-        build_catalog(
-            rows,
-            embedder=TrackingEmbedder(),
-            image_loader=TrackingImageLoader(image_map),
-            output_dir=workspace / "seed-plus-previous",
-            catalog_key=CATALOG_KEY,
-            version="v2",
-            embedding_model=EMBEDDING_MODEL,
-            seed_embeddings={"test-source:alpha": _normalized_embedding_for_color((255, 0, 0))},
-            previous_build=previous,
-        )
+    embedder = TrackingEmbedder()
+    seeded = _normalized_embedding_for_color((0, 0, 255))
+    build = build_catalog(
+        [make_row("alpha", "memory://alpha-new", "fp-new", metadata={"name": "Alpha"})],
+        embedder=embedder,
+        image_loader=TrackingImageLoader({}),
+        output_dir=workspace / "seed-plus-previous",
+        catalog_key=CATALOG_KEY,
+        version="v2",
+        embedding_model=EMBEDDING_MODEL,
+        seed_embeddings={"test-source:alpha": seeded},
+        previous_build=previous,
+    )
+
+    assert embedder.calls == []
+    assert np.array_equal(build.embeddings[0], seeded.astype(np.float16))
+    assert build.manifest.delta.operations == 1
 
 
 def test_state_only_change_reuses_embedding_and_roundtrips_delta(workspace: Path) -> None:

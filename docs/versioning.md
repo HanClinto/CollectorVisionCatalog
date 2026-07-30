@@ -128,8 +128,8 @@ version download the base and then apply updates after `base.version`.
 
 ## Release audits
 
-GitHub releases contain one `audit.json`, not one public manifest per catalog
-version and not a separate `SHA256SUMS`.
+GitHub releases contain one `verification-audit.json`, not one public manifest
+per catalog version and not a separate `SHA256SUMS`.
 
 The audit is an immutable provenance receipt containing:
 

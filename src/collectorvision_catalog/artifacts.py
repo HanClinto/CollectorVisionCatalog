@@ -560,8 +560,6 @@ def build_catalog(
     normalized_rows = _prepare_rows(rows, descriptor)
     if not normalized_rows:
         raise ValidationError("source rows must not be empty")
-    if previous_build is not None and seed_embeddings is not None:
-        raise ValidationError("seed_embeddings cannot be combined with previous_build")
     if previous_build is not None:
         _validate_previous_build(
             previous_build,

@@ -23,7 +23,7 @@ from .feed import EmbeddingContract
 from .publication import CatalogVersionManifest, ChangeCounts, PublishedAsset
 from .versioning import validate_public_name
 
-AUDIT_FILENAME = "audit.json"
+AUDIT_FILENAME = "verification-audit.json"
 _CHECKSUM = re.compile(r"^[0-9a-f]{64}$")
 _COMMIT = re.compile(r"^[0-9a-f]{7,40}$")
 _KEY_COMPONENT = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
