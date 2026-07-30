@@ -19,6 +19,7 @@ from collectorvision_catalog import (
     SourceRevision,
     ValidationError,
     build_catalog,
+    catalog_row_key,
     manifest_filename_for_catalog,
     validate_artifacts,
     write_catalog_index,
@@ -272,7 +273,7 @@ def load_legacy_embeddings(path: Path) -> dict[str, NDArray[np.float32]]:
                 raise ValidationError(
                     f"legacy Scryfall card_ids[{index}] is not canonical"
                 )
-            key = f"scryfall:{canonical_id}:face:{face_index}"
+            key = catalog_row_key("scryfall", canonical_id, face_index)
             if key in result:
                 raise ValidationError(f"duplicate legacy Scryfall row key {key!r}")
             result[key] = embeddings[index]

@@ -794,10 +794,10 @@ def local_first_image_loader(
 
 
 def _row_source_id(row: RecognitionRow) -> str:
-    if value := row.identifiers.get("scryfall_card"):
-        return _canonical_uuid(value, row.key)
-    if value := row.identifiers.get("tcgplayer_product"):
-        return _positive_decimal_id(value, row.key)
+    if row.provider == "scryfall":
+        return _canonical_uuid(row.id, row.key)
+    if row.provider == "tcgplayer":
+        return _positive_decimal_id(row.id, row.key)
     raise ValidationError(f"row {row.key!r} has no supported source image identifier")
 
 
@@ -873,7 +873,7 @@ class ScryfallImageCache:
 
     def path_for_row(self, row: RecognitionRow) -> Path:
         face = "back" if row.face_index > 0 else "front"
-        card_id = _canonical_uuid(row.identifiers["scryfall_card"], row.key)
+        card_id = _canonical_uuid(row.id, row.key)
         return self.images_root / face / card_id[0] / card_id[1] / f"{card_id}.png"
 
     def is_current(self, row: RecognitionRow) -> bool:
@@ -976,7 +976,7 @@ class TCGplayerImageCache:
         self._refresh_urls = frozenset(refresh_urls)
 
     def path_for_row(self, row: RecognitionRow) -> Path:
-        product_id = _positive_decimal_id(row.identifiers["tcgplayer_product"], row.key)
+        product_id = _positive_decimal_id(row.id, row.key)
         suffix = "" if row.face_index == 0 else f"_{row.face_index}"
         return self.images_root / product_id[0] / product_id[1] / f"{product_id}{suffix}.jpg"
 

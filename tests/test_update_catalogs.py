@@ -57,9 +57,9 @@ def make_config(path: Path, *, duplicate: bool = False) -> None:
 
 def make_row(image_url: str = "memory://front") -> RecognitionRow:
     return RecognitionRow(
-        key=f"scryfall:{CARD_ID}:face:0",
-        identifiers={"scryfall_card": CARD_ID, "scryfall_oracle": ORACLE_ID},
-        face_index=0,
+        provider="scryfall",
+        id=CARD_ID,
+        identifiers={"scryfall_oracle": ORACLE_ID},
         image_url=image_url,
         image_fingerprint="fingerprint-1",
         metadata={"name": "Card"},
@@ -179,8 +179,8 @@ def test_archived_scryfall_files_build_an_exact_delta(
         return [
             replace(
                 make_row(),
-                key=f"scryfall:{card_id}:face:0",
-                identifiers={"scryfall_card": card_id, "scryfall_oracle": ORACLE_ID},
+                id=card_id,
+                identifiers={"scryfall_oracle": ORACLE_ID},
                 image_url=f"memory://{card['id']}",
                 image_fingerprint=f"fingerprint-{card['id']}",
             )
@@ -262,11 +262,12 @@ def test_local_first_image_loader_uses_front_and_back_cache_names(tmp_path: Path
     Image.new("RGB", (2, 2), (0, 0, 255)).save(tmp_path / f"{CARD_ID}_back.jpg")
     front = make_row("https://example.test/front")
     back = RecognitionRow(
-        key=f"scryfall:{CARD_ID}:face:1",
+        provider="scryfall",
+        id=CARD_ID,
         identifiers=front.identifiers,
-        face_index=1,
         image_url="https://example.test/back",
         image_fingerprint="fingerprint-2",
+        face_index=1,
         metadata={"name": "Card"},
     )
     loader = updater.local_first_image_loader([front, back], [tmp_path])
@@ -306,9 +307,9 @@ def test_tcgplayer_cache_resolves_sharded_product_image(tmp_path: Path) -> None:
     path.parent.mkdir(parents=True)
     Image.new("RGB", (2, 2), (255, 0, 0)).save(path)
     row = RecognitionRow(
-        key="tcgplayer:12345:face:0",
-        identifiers={"tcgplayer_product": "12345"},
-        face_index=0,
+        provider="tcgplayer",
+        id="12345",
+        identifiers={},
         image_url="https://tcgplayer-cdn.tcgplayer.com/product/12345_in_1000x1000.jpg",
         image_fingerprint="fingerprint",
         metadata={"name": "Card"},
@@ -348,7 +349,7 @@ def test_image_cache_rejects_unsafe_source_identifiers(tmp_path: Path) -> None:
     (images_root / "back").mkdir()
     unsafe_scryfall = replace(
         make_row(),
-        identifiers={"scryfall_card": "../../escape"},
+        id="../../escape",
     )
     with pytest.raises(ValidationError, match="invalid Scryfall card ID"):
         updater.ScryfallImageCache(tmp_path, [unsafe_scryfall]).path_for_row(
@@ -356,9 +357,9 @@ def test_image_cache_rejects_unsafe_source_identifiers(tmp_path: Path) -> None:
         )
 
     unsafe_tcgplayer = RecognitionRow(
-        key="tcgplayer:unsafe:face:0",
-        identifiers={"tcgplayer_product": "../../escape"},
-        face_index=0,
+        provider="tcgplayer",
+        id="../../escape",
+        identifiers={},
         image_url="https://example.test/card.jpg",
         image_fingerprint="fingerprint",
     )
@@ -413,16 +414,15 @@ def test_tcgplayer_download_falls_back_to_first_suffix(monkeypatch: pytest.Monke
 
 def test_refresh_tcgplayer_images_excludes_only_unavailable_rows() -> None:
     available = RecognitionRow(
-        key="tcgplayer:1:face:0",
-        identifiers={"tcgplayer_product": "1"},
-        face_index=0,
+        provider="tcgplayer",
+        id="1",
+        identifiers={},
         image_url="memory://available",
         image_fingerprint="available",
     )
     unavailable = replace(
         available,
-        key="tcgplayer:2:face:0",
-        identifiers={"tcgplayer_product": "2"},
+        id="2",
         image_url="memory://unavailable",
     )
 
@@ -442,10 +442,10 @@ def test_refresh_tcgplayer_images_excludes_only_unavailable_rows() -> None:
 
 def test_changed_row_budget_counts_updates_additions_and_removals() -> None:
     alpha = make_row()
-    beta = replace(alpha, key="scryfall:card-2:face:0")
+    beta = replace(alpha, id="card-2")
     previous = SimpleNamespace(rows=(alpha, beta))
     changed_alpha = replace(alpha, image_fingerprint="changed")
-    added = replace(alpha, key="scryfall:card-3:face:0")
+    added = replace(alpha, id="card-3")
     assert updater._count_changed_image_rows([changed_alpha, added], previous) == 3
 
 
@@ -472,11 +472,7 @@ def test_descriptor_label_change_reuses_embeddings_and_starts_fresh_snapshot(
     row = make_row()
     extra_seed_row = replace(
         row,
-        key="scryfall:cc000000-0000-0000-0000-000000000001:face:0",
-        identifiers={
-            **row.identifiers,
-            "scryfall_card": "cc000000-0000-0000-0000-000000000001",
-        },
+        id="cc000000-0000-0000-0000-000000000001",
         image_url="memory://extra-seed",
     )
     seed_config = tmp_path / "seed-config.json"

@@ -57,9 +57,8 @@ A recognition record has this logical shape:
 
 ```json
 {
-  "key": "scryfall:00000000-0000-0000-0000-000000000000:face:1",
+  "id": "00000000-0000-0000-0000-000000000000",
   "identifiers": {
-    "scryfall_card": "00000000-0000-0000-0000-000000000000",
     "scryfall_oracle": "11111111-1111-1111-1111-111111111111",
     "tcgplayer_product": "12345"
   },
@@ -67,14 +66,23 @@ A recognition record has this logical shape:
 }
 ```
 
-`key` identifies an embedding row and is stable across releases. All external
-IDs are peers in `identifiers`; names are explicit, such as `scryfall_card`,
-`scryfall_oracle`, `tcgplayer_product`, `tcgplayer_etched_product`,
-`tcgplayer_category`, and `tcgplayer_group`. The catalog descriptor chooses the
-single `result_identifier` returned by compatibility search APIs, and every row
-must contain it. `face_index` is omitted for front faces and defaults to `0`; `1`
-identifies the back face. Genuine per-face names belong in optional metadata,
-not recognition records.
+`id` is the catalog's primary result ID. The catalog descriptor's
+`result_identifier` names its source namespace—for example, `scryfall_card` or
+`tcgplayer_product`—without repeating that name and value in every row. Other
+source IDs remain explicit peers in `identifiers`, such as `scryfall_oracle`,
+`tcgplayer_product`, `tcgplayer_etched_product`, `tcgplayer_category`, and
+`tcgplayer_group`.
+
+The selected result namespace must be the provider's primary namespace:
+Scryfall catalogs use `scryfall_card`, and TCGplayer catalogs use
+`tcgplayer_product`. To look up a row by that namespace, clients compare the
+query with `id`; `identifiers` contains only additional namespaces.
+
+`face_index` is omitted for front faces and defaults to `0`; `1` identifies the
+back face. A client that needs a globally unique map key can derive
+`<provider>:<id>` for the front face and `<provider>:<id>:face:<N>` for
+additional faces. The derived key is not stored in public rows. Genuine
+per-face names belong in optional metadata, not recognition records.
 
 The matrix is deterministic gzip-compressed raw little-endian, row-major FP16,
 not NPZ. Raw FP16 is a shared substrate for NumPy and browsers; NPZ is
@@ -96,8 +104,10 @@ printing does not promise accurate language or edition distinction.
 
 ### Optional metadata layer
 
-Metadata is a separate gzip JSONL asset keyed by recognition `key`. Clients
-that only need recognition never download it. Common fields include:
+Metadata is a separate gzip JSONL asset aligned one-to-one with recognition
+rows. Each line is the row's metadata object, or JSON `null` when that row has
+no metadata. It does not repeat row identity. Clients that only need
+recognition never download it. Common fields include:
 
 - name;
 - set ID, code, and name;
@@ -128,9 +138,10 @@ official catalog.
 
 ### Updater state
 
-State is a release asset used by the next build. It contains the stable key,
-image URL, and image fingerprint for every row. It contains neither source
-images nor a cache of source responses.
+State is a private builder asset used by the next build. It is line-aligned
+with recognition rows and contains the image URL and image fingerprint without
+repeating row identity. It contains neither source images nor a cache of source
+responses.
 
 The state and prior recognition snapshot are sufficient to reuse unchanged
 embeddings. Metadata fingerprints are intentionally independent from image
@@ -148,6 +159,13 @@ new base.
 A hard checkpoint publishes a base without a delta and deliberately forces a
 full refresh. See [Catalog v2 versioning and paths](versioning.md) for the exact
 rules and manifest shapes.
+
+Delta operations cannot rely on row alignment, so they target a row with `id`
+and an optional nonzero `face_index`. Recognition upserts carry changed
+identifiers and embeddings; metadata upserts carry changed metadata. Deletes
+use the same compact target. The provider remains catalog-level manifest data.
+Recognition and metadata operations are independent and idempotent, so a
+removed row may have a delete in both layers.
 
 ### Reconstructing historical Scryfall snapshots
 
@@ -190,10 +208,11 @@ For each configured source/game/model tuple:
 1. Verify the captured upstream revision and stream current source metadata.
 2. Normalize each usable source image into a stable recognition record.
 3. Compare each row's image fingerprint with the previous release state.
-4. Reuse the previous embedding when both key and image fingerprint match.
+4. Reuse the previous embedding when both derived row identity and image
+   fingerprint match.
 5. Download changed images into bounded temporary batches.
 6. Embed each batch and immediately discard its images.
-7. Sort by stable key and write deterministic artifacts.
+7. Sort by derived row identity and write deterministic artifacts.
 8. Build and verify the exact-predecessor delta against the full snapshot.
 9. Publish each changed catalog version and update the moving feed.
 
@@ -222,8 +241,8 @@ references are tracked in
 ### Scryfall
 
 The MTG adapter uses Scryfall bulk data. Each available face is a separate
-recognition row. Scryfall card UUIDs, Oracle IDs, and available TCGplayer IDs are peer
-identifiers.
+recognition row. The Scryfall card UUID is the primary `id`; Oracle IDs and
+available TCGplayer IDs are peer identifiers.
 
 The selected bulk-data entry supplies the source type, bulk identity,
 `jsonl_download_uri`, and update timestamp. The bulk JSONL is streamed as a
@@ -247,9 +266,10 @@ TCGplayer-backed games use the free TCGCSV product feed. The updater checks
 `last-updated.txt` immediately before and after fetching categories, groups, and
 products and aborts if it changes, so all categories share one global revision.
 It sends a descriptive user agent and respects TCGCSV's request guidance.
-TCGplayer product, category, and group IDs are peer identifiers.
 
-TCGCSV payloads are streamed as build inputs and are not release assets.
+The TCGplayer product ID is the primary `id`; category, group, and other
+available source IDs are peer identifiers. TCGCSV payloads are streamed as
+build inputs and are not release assets.
 Together, recorded source identities and timestamps make baseline seeds and
 later refreshes auditable and reproducible by upstream snapshot.
 

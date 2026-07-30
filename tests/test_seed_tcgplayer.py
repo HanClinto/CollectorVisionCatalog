@@ -18,14 +18,15 @@ SPEC.loader.exec_module(seed)
 
 def make_row(product_id: str, modified_on: str, face_index: int = 0) -> RecognitionRow:
     return RecognitionRow(
-        key=f"tcgplayer:{product_id}:face:{face_index}",
-        identifiers={"tcgplayer_product": product_id},
-        face_index=face_index,
+        provider="tcgplayer",
+        id=product_id,
+        identifiers={},
         image_url=(
             f"https://tcgplayer-cdn.tcgplayer.com/product/{product_id}"
             f"{'' if face_index == 0 else f'_{face_index}'}_in_1000x1000.jpg"
         ),
         image_fingerprint=f"fp-{modified_on}",
+        face_index=face_index,
         metadata={"name": product_id, "modified_on": modified_on},
     )
 
@@ -38,14 +39,14 @@ def test_seed_plan_reuses_all_legacy_fronts() -> None:
         make_row("new", "2026-05-01T00:00:00"),
     ]
     embeddings = {
-        "tcgplayer:old:face:0": np.ones(128, dtype=np.float32),
-        "tcgplayer:changed:face:0": np.ones(128, dtype=np.float32),
+        "tcgplayer:old": np.ones(128, dtype=np.float32),
+        "tcgplayer:changed": np.ones(128, dtype=np.float32),
     }
 
     class Cache:
         @staticmethod
         def is_cached(row: RecognitionRow) -> bool:
-            return row.identifiers["tcgplayer_product"] != "new"
+            return row.id != "new"
 
     plan = seed.create_seed_plan(
         "milo1/tcgplayer/test",
@@ -55,12 +56,12 @@ def test_seed_plan_reuses_all_legacy_fronts() -> None:
     )
 
     assert set(plan.seed_embeddings) == {
-        "tcgplayer:old:face:0",
-        "tcgplayer:changed:face:0",
+        "tcgplayer:old",
+        "tcgplayer:changed",
     }
     assert [row.key for row in plan.inference_rows] == [
         "tcgplayer:old:face:1",
-        "tcgplayer:new:face:0",
+        "tcgplayer:new",
     ]
     assert plan.summary()["downloads_required"] == 1
     assert plan.summary()["embeddings_to_compute"] == 2

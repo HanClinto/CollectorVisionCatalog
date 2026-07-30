@@ -280,7 +280,7 @@ def publish_catalog_version(
                 {
                     "embeddings": build.manifest.rows,
                     "identifiers": build.manifest.rows,
-                    "metadata": sum(row.metadata is not None for row in build.rows),
+                    "metadata": build.manifest.rows,
                 },
             )
             if plan.publish_base
@@ -416,8 +416,8 @@ def _validate_base_assets(assets: Mapping[str, PublishedAsset]) -> None:
             raise ValidationError(f"base asset {name!r} must be under base/")
     if assets["embeddings"].rows != assets["identifiers"].rows:
         raise ValidationError("base embeddings and identifiers must have equal rows")
-    if assets["metadata"].rows > assets["identifiers"].rows:
-        raise ValidationError("base metadata cannot contain unknown rows")
+    if assets["metadata"].rows != assets["identifiers"].rows:
+        raise ValidationError("base metadata and identifiers must have equal rows")
 
 
 def _assets_to_dict(assets: Mapping[str, PublishedAsset]) -> dict[str, Any]:

@@ -8,7 +8,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from .artifacts import RecognitionRow, ValidationError
+from .artifacts import (
+    RecognitionRow,
+    ValidationError,
+    primary_identifier_for_provider,
+)
 
 _DECISIONS = {"approve", "quarantine", "reject"}
 _MATCH_FIELDS = {
@@ -169,7 +173,7 @@ def _matches_fields(match: Mapping[str, object], row: RecognitionRow) -> bool:
     }
     for field, expected in match.items():
         if field == "identifiers":
-            if any(row.identifiers.get(name) != value for name, value in expected.items()):
+            if any(_identifier_value(row, name) != value for name, value in expected.items()):
                 return False
         elif field == "name_regex":
             name = (row.metadata or {}).get("name")
@@ -178,6 +182,11 @@ def _matches_fields(match: Mapping[str, object], row: RecognitionRow) -> bool:
         elif values[field] != expected:
             return False
     return True
+
+
+def _identifier_value(row: RecognitionRow, name: str) -> str | None:
+    primary_name = primary_identifier_for_provider(row.provider)
+    return row.id if name == primary_name else row.identifiers.get(name)
 
 
 def _parse_match(

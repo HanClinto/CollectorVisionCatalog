@@ -120,21 +120,29 @@ def make_png_bytes(color: tuple[int, int, int]) -> bytes:
 
 
 def make_row(
-    key: str,
+    row_id: str,
     image_url: str,
     image_fingerprint: str,
     *,
-    namespace: str = "test",
     primary_value: str | None = None,
     identifiers: dict[str, str] | None = None,
     face_index: int = 0,
     metadata: dict[str, object] | None = None,
 ) -> RecognitionRow:
+    provider = "test-source"
+    primary_id = primary_value or row_id
+    if ":face:" in row_id:
+        base, parsed_face = row_id.rsplit(":face:", 1)
+        provider, primary_id = base.split(":", 1)
+        face_index = int(parsed_face)
+    elif ":" in row_id:
+        provider, primary_id = row_id.split(":", 1)
     return RecognitionRow(
-        key=key,
-        identifiers={namespace: primary_value or key, **(identifiers or {})},
-        face_index=face_index,
+        provider=provider,
+        id=primary_id,
+        identifiers=identifiers or {},
         image_url=image_url,
         image_fingerprint=image_fingerprint,
+        face_index=face_index,
         metadata=metadata,
     )

@@ -62,7 +62,7 @@ def test_normalize_scryfall_card_faces_and_identifiers() -> None:
     rows = normalize_scryfall_card(card)
 
     assert [row.key for row in rows] == [
-        f"scryfall:{CARD_ID}:face:0",
+        f"scryfall:{CARD_ID}",
         f"scryfall:{CARD_ID}:face:1",
     ]
     assert rows[0].face_index == 0
@@ -72,7 +72,6 @@ def test_normalize_scryfall_card_faces_and_identifiers() -> None:
     assert rows[0].image_url == "https://img/front.png"
     assert rows[1].image_url == "https://img/back-large.png"
     assert rows[0].identifiers == {
-        "scryfall_card": CARD_ID,
         "scryfall_oracle": ORACLE_ID,
         "tcgplayer_etched_product": "2002",
         "tcgplayer_product": "1001",
@@ -125,7 +124,6 @@ def test_normalize_tcgcsv_product_images_and_filtering() -> None:
     assert [row.image_url for row in rows] == build_tcgplayer_image_urls("123456", 2)
     assert rows[1].face_index == 1
     assert rows[0].identifiers == {
-        "tcgplayer_product": "123456",
         "tcgplayer_category": "10",
         "tcgplayer_group": "20",
     }

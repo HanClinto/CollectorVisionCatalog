@@ -28,9 +28,9 @@ MISSING_ID = "aa000000-0000-0000-0000-000000000003"
 
 def make_row(card_id: str, revision: int) -> RecognitionRow:
     return RecognitionRow(
-        key=f"scryfall:{card_id}:face:0",
-        identifiers={"scryfall_card": card_id},
-        face_index=0,
+        provider="scryfall",
+        id=card_id,
+        identifiers={},
         image_url=f"https://cards.scryfall.io/png/front/a/b/{card_id}.png?{revision}",
         image_fingerprint=f"fp-{revision}",
         metadata={"name": card_id},
@@ -72,7 +72,7 @@ def test_refresh_seed_cache_only_loads_pending_rows() -> None:
 
     class Cache:
         def is_current(self, row: RecognitionRow) -> bool:
-            return row.identifiers["scryfall_card"] == CURRENT_ID
+            return row.id == CURRENT_ID
 
         def __call__(self, image_url: str) -> Image.Image:
             loaded.add(image_url)
@@ -134,10 +134,10 @@ def test_legacy_scryfall_embeddings_map_front_and_back_rows(tmp_path: Path) -> N
     loaded = seed.load_legacy_embeddings(catalog_path)
 
     assert sorted(loaded) == [
-        f"scryfall:{front_id}:face:0",
+        f"scryfall:{front_id}",
         f"scryfall:{back_id}:face:1",
     ]
-    assert np.array_equal(loaded[f"scryfall:{front_id}:face:0"], embeddings[0])
+    assert np.array_equal(loaded[f"scryfall:{front_id}"], embeddings[0])
 
 
 def test_legacy_scryfall_embeddings_reject_unsafe_ids(tmp_path: Path) -> None:
@@ -167,4 +167,4 @@ def test_legacy_scryfall_embeddings_decode_packed_uuid_rows(tmp_path: Path) -> N
 
     loaded = seed.load_legacy_embeddings(catalog_path)
 
-    assert list(loaded) == [f"scryfall:{card_id}:face:0"]
+    assert list(loaded) == [f"scryfall:{card_id}"]

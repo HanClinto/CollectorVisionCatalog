@@ -18,6 +18,7 @@ from collectorvision_catalog import (
     SourceRevision,
     ValidationError,
     build_catalog,
+    catalog_row_key,
     manifest_filename_for_catalog,
     validate_artifacts,
     write_catalog_index,
@@ -80,7 +81,7 @@ def load_legacy_embeddings(
             )
         result: dict[str, NDArray[np.float32]] = {}
         for card_id, embedding in zip(card_ids, embeddings, strict=True):
-            key = f"tcgplayer:{card_id}:face:0"
+            key = catalog_row_key("tcgplayer", card_id)
             if key in result:
                 raise ValidationError(f"duplicate legacy card ID {card_id!r} in {catalog_path}")
             result[key] = embedding.astype(np.float32, copy=True)

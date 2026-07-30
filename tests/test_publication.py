@@ -6,6 +6,7 @@ import pytest
 from conftest import TrackingEmbedder, TrackingImageLoader, build_test_catalog, make_row
 
 from collectorvision_catalog import (
+    CatalogVersionManifest,
     ValidationError,
     load_catalog_version_manifest,
     plan_catalog_version,
@@ -67,6 +68,22 @@ def test_initial_version_publishes_only_readable_base_paths(workspace: Path) -> 
     for asset in manifest.base.values():
         assert (path.parent / asset.path).is_file()
     assert load_catalog_version_manifest(path) == manifest
+
+
+def test_public_manifest_requires_line_aligned_metadata(workspace: Path) -> None:
+    build, build_dir = _build(workspace, 0)
+    manifest, _ = publish_catalog_version(
+        build,
+        build_dir,
+        workspace / "public",
+        "scryfall-mtg",
+        plan_catalog_version(None),
+    )
+    payload = manifest.to_dict()
+    payload["base"]["metadata"]["rows"] = 0
+
+    with pytest.raises(ValidationError, match="metadata and identifiers must have equal rows"):
+        CatalogVersionManifest.from_dict(payload)
 
 
 def test_incremental_version_publishes_only_delta(workspace: Path) -> None:

@@ -19,6 +19,10 @@ from PIL import Image
 JSONValue = None | bool | int | float | str | list["JSONValue"] | dict[str, "JSONValue"]
 
 _SAFE_SLUG_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
+_PRIMARY_IDENTIFIERS = {
+    "scryfall": "scryfall_card",
+    "tcgplayer": "tcgplayer_product",
+}
 _REQUIRED_ASSET_NAMES = {
     "embeddings",
     "identifiers",
@@ -177,15 +181,15 @@ class StateRecord:
 
     def to_dict(self) -> dict[str, str]:
         return {
-            "key": self.key,
             "image_url": self.image_url,
             "image_fingerprint": self.image_fingerprint,
         }
 
     @classmethod
-    def from_dict(cls, payload: Mapping[str, Any]) -> StateRecord:
+    def from_dict(cls, payload: Mapping[str, Any], *, key: str) -> StateRecord:
+        _require_exact_fields(payload, {"image_url", "image_fingerprint"}, "state")
         return cls(
-            key=_require_non_empty_string(payload.get("key"), "state.key"),
+            key=key,
             image_url=_require_non_empty_string(payload.get("image_url"), "state.image_url"),
             image_fingerprint=_require_non_empty_string(
                 payload.get("image_fingerprint"),
@@ -196,26 +200,26 @@ class StateRecord:
 
 @dataclass(frozen=True)
 class RecognitionRow:
-    key: str
+    provider: str
+    id: str
     identifiers: dict[str, str]
-    face_index: int
     image_url: str
     image_fingerprint: str
+    face_index: int = 0
     metadata: dict[str, JSONValue] | None = None
+
+    @property
+    def key(self) -> str:
+        return catalog_row_key(self.provider, self.id, self.face_index)
 
     def minimal_record(self) -> dict[str, Any]:
         record = {
-            "key": self.key,
+            "id": self.id,
             "identifiers": dict(sorted(self.identifiers.items())),
         }
         if self.face_index:
             record["face_index"] = self.face_index
         return record
-
-    def metadata_record(self) -> dict[str, Any] | None:
-        if self.metadata is None:
-            return None
-        return {"key": self.key, "metadata": self.metadata}
 
     def state_record(self) -> StateRecord:
         return StateRecord(
@@ -226,11 +230,12 @@ class RecognitionRow:
 
     def with_metadata(self, metadata: dict[str, JSONValue] | None) -> RecognitionRow:
         return RecognitionRow(
-            key=self.key,
+            provider=self.provider,
+            id=self.id,
             identifiers=dict(self.identifiers),
-            face_index=self.face_index,
             image_url=self.image_url,
             image_fingerprint=self.image_fingerprint,
+            face_index=self.face_index,
             metadata=metadata,
         )
 
@@ -239,9 +244,19 @@ class RecognitionRow:
         cls,
         minimal_payload: Mapping[str, Any],
         state_payload: Mapping[str, Any] | StateRecord,
+        *,
+        provider: str,
         metadata: Mapping[str, Any] | None = None,
     ) -> RecognitionRow:
-        key = _require_non_empty_string(minimal_payload.get("key"), "key")
+        allowed_fields = {"id", "identifiers", "face_index"}
+        _require_allowed_fields(
+            minimal_payload,
+            required={"id", "identifiers"},
+            allowed=allowed_fields,
+            name="recognition record",
+        )
+        provider = _identity_component(provider, "provider")
+        primary_id = _identity_component(minimal_payload.get("id"), "id")
         identifiers = {
             _require_non_empty_string(namespace, "identifiers key"): _require_non_empty_string(
                 value,
@@ -252,8 +267,6 @@ class RecognitionRow:
                 "identifiers",
             ).items()
         }
-        if not identifiers:
-            raise ValidationError("identifiers must be a non-empty object")
         face_index = minimal_payload.get("face_index", 0)
         if (
             not isinstance(face_index, int)
@@ -261,10 +274,11 @@ class RecognitionRow:
             or face_index < 0
         ):
             raise ValidationError("face_index must be a non-negative integer")
-        state = (
-            state_payload
-            if isinstance(state_payload, StateRecord)
-            else StateRecord.from_dict(state_payload)
+        if face_index == 0 and "face_index" in minimal_payload:
+            raise ValidationError("recognition record must omit face_index for face 0")
+        key = catalog_row_key(provider, primary_id, face_index)
+        state = state_payload if isinstance(state_payload, StateRecord) else StateRecord.from_dict(
+            state_payload, key=key
         )
         if state.key != key:
             raise ValidationError(
@@ -272,11 +286,12 @@ class RecognitionRow:
             )
         normalized_metadata = None if metadata is None else _canonicalize_metadata(metadata)
         return cls(
-            key=key,
+            provider=provider,
+            id=primary_id,
             identifiers=dict(sorted(identifiers.items())),
-            face_index=face_index,
             image_url=state.image_url,
             image_fingerprint=state.image_fingerprint,
+            face_index=face_index,
             metadata=normalized_metadata,
         )
 
@@ -436,10 +451,17 @@ class CatalogManifest:
             raise ValidationError(f"manifest is missing required assets: {sorted(missing_assets)}")
         if delta.operations and "identifiers_delta" not in assets:
             raise ValidationError("manifest with identifier delta operations needs an asset")
+        if not delta.operations and {
+            "identifiers_delta",
+            "embeddings_delta",
+        }.intersection(assets):
+            raise ValidationError("manifest without identifier delta operations cannot have assets")
         if "embeddings_delta" in assets and "identifiers_delta" not in assets:
             raise ValidationError("embedding delta requires identifier delta operations")
         if delta.metadata_operations and "metadata_delta" not in assets:
             raise ValidationError("manifest with metadata delta operations needs an asset")
+        if not delta.metadata_operations and "metadata_delta" in assets:
+            raise ValidationError("manifest without metadata delta operations cannot have an asset")
         return cls(
             schema_version=schema_version,
             catalog_key=_require_non_empty_string(payload.get("catalog_key"), "catalog_key"),
@@ -525,21 +547,13 @@ def build_catalog(
     catalog_key = _require_non_empty_string(catalog_key, "catalog_key")
     version = _require_non_empty_string(version, "version")
     embedding_model = _require_non_empty_string(embedding_model, "embedding_model")
-    normalized_rows = _prepare_rows(rows)
-    if not normalized_rows:
-        raise ValidationError("source rows must not be empty")
     if not isinstance(descriptor, CatalogDescriptor):
         raise ValidationError("descriptor must be a CatalogDescriptor")
     if not isinstance(source_revision, SourceRevision):
         raise ValidationError("source_revision must be a SourceRevision")
-    missing_result_ids = [
-        row.key for row in normalized_rows if descriptor.result_identifier not in row.identifiers
-    ]
-    if missing_result_ids:
-        raise ValidationError(
-            f"rows are missing result identifier {descriptor.result_identifier!r}: "
-            f"{missing_result_ids[:10]}"
-        )
+    normalized_rows = _prepare_rows(rows, descriptor)
+    if not normalized_rows:
+        raise ValidationError("source rows must not be empty")
     if previous_build is not None and seed_embeddings is not None:
         raise ValidationError("seed_embeddings cannot be combined with previous_build")
     if previous_build is not None:
@@ -650,34 +664,38 @@ def load_catalog_build(
         asset_name="embeddings",
         expected_rows=manifest.rows,
     )
-    state_by_key = _load_state_map(state_rows)
-    metadata_by_key = _load_metadata_map(metadata_rows)
+    if len(minimal_rows) != manifest.rows:
+        raise ValidationError(
+            f"manifest rows={manifest.rows} does not match recognition row count "
+            f"{len(minimal_rows)}"
+        )
+    if len(state_rows) != manifest.rows:
+        raise ValidationError("state rows must be line-aligned with identifiers")
+    if len(metadata_rows) != manifest.rows:
+        raise ValidationError("metadata rows must be line-aligned with identifiers")
     rows: list[RecognitionRow] = []
     seen_keys: set[str] = set()
-    for payload in minimal_rows:
-        key = _require_non_empty_string(payload.get("key"), "recognition.key")
+    state_by_key: dict[str, StateRecord] = {}
+    for index, (payload, state_payload, metadata_payload) in enumerate(
+        zip(minimal_rows, state_rows, metadata_rows, strict=True)
+    ):
+        minimal_payload = _require_mapping(payload, f"identifiers line {index + 1}")
+        state_mapping = _require_mapping(state_payload, f"state_rows line {index + 1}")
+        if metadata_payload is not None and not isinstance(metadata_payload, Mapping):
+            raise ValidationError(f"metadata line {index + 1} must be an object or null")
+        row = RecognitionRow.from_artifact_records(
+            minimal_payload,
+            state_mapping,
+            provider=manifest.descriptor.source,
+            metadata=metadata_payload,
+        )
+        key = row.key
         if key in seen_keys:
             raise ValidationError(f"duplicate recognition entry for key {key!r}")
         seen_keys.add(key)
-        state = state_by_key.get(key)
-        if state is None:
-            raise ValidationError(f"missing state entry for key {key!r}")
-        row = RecognitionRow.from_artifact_records(
-            payload,
-            state,
-            metadata=metadata_by_key.get(key),
-        )
         _validate_result_identifier(row, manifest.descriptor, "recognition row")
         rows.append(row)
-    if len(rows) != manifest.rows:
-        raise ValidationError(
-            f"manifest rows={manifest.rows} does not match recognition row count {len(rows)}"
-        )
-    if set(state_by_key) != seen_keys:
-        raise ValidationError("state rows must match identifiers exactly")
-    if not set(metadata_by_key).issubset(seen_keys):
-        unknown_keys = sorted(set(metadata_by_key).difference(seen_keys))
-        raise ValidationError(f"metadata contains unknown keys: {unknown_keys}")
+        state_by_key[key] = row.state_record()
     if embeddings.shape != (manifest.rows, manifest.dim):
         raise ValidationError(
             "embedding matrix shape "
@@ -705,10 +723,18 @@ def load_delta_bundle(
     operations: list[DeltaOperation] = []
     seen_keys: set[str] = set()
     upsert_count = 0
-    for payload in operation_payloads:
+    for raw_payload in operation_payloads:
+        payload = _require_mapping(raw_payload, "identifier delta operation")
         op_type = _require_non_empty_string(payload.get("op"), "delta op")
         if op_type == "delete":
-            key = _require_non_empty_string(payload.get("key"), "delta delete key")
+            primary_id, face_index = _parse_identity_target(payload, "delta delete")
+            _require_allowed_fields(
+                payload,
+                required={"op", "id"},
+                allowed={"op", "id", "face_index"},
+                name="delta delete",
+            )
+            key = catalog_row_key(manifest.descriptor.source, primary_id, face_index)
             if key in seen_keys:
                 raise ValidationError(f"duplicate delta operation for key {key!r}")
             seen_keys.add(key)
@@ -716,12 +742,21 @@ def load_delta_bundle(
             continue
         if op_type != "upsert":
             raise ValidationError(f"unsupported delta op {op_type!r}")
+        _require_exact_fields(
+            payload,
+            {"op", "record", "state", "embedding_index"},
+            "delta upsert",
+        )
         record = _require_mapping(payload.get("record"), "delta upsert record")
         state_payload = _require_mapping(payload.get("state"), "delta upsert state")
         embedding_index = payload.get("embedding_index")
         if not isinstance(embedding_index, int) or embedding_index < 0:
             raise ValidationError("delta upsert embedding_index must be a non-negative integer")
-        row = RecognitionRow.from_artifact_records(record, state_payload)
+        row = RecognitionRow.from_artifact_records(
+            record,
+            state_payload,
+            provider=manifest.descriptor.source,
+        )
         _validate_result_identifier(row, manifest.descriptor, "delta upsert")
         if row.key in seen_keys:
             raise ValidationError(f"duplicate delta operation for key {row.key!r}")
@@ -744,7 +779,10 @@ def load_delta_bundle(
             f"{embeddings.shape} does not match ({upsert_count}, {manifest.dim})"
         )
     metadata_operations = (
-        _load_metadata_delta(_load_jsonl_asset(manifest, asset_root, "metadata_delta"))
+        _load_metadata_delta(
+            _load_jsonl_asset(manifest, asset_root, "metadata_delta"),
+            provider=manifest.descriptor.source,
+        )
         if manifest.delta.metadata_operations
         else []
     )
@@ -908,22 +946,41 @@ def _validate_result_identifier(
     descriptor: CatalogDescriptor,
     record_type: str,
 ) -> None:
-    if descriptor.result_identifier not in row.identifiers:
+    if row.provider != descriptor.source:
         raise ValidationError(
-            f"{record_type} {row.key!r} is missing result identifier "
-            f"{descriptor.result_identifier!r}"
+            f"{record_type} {row.key!r} provider {row.provider!r} does not match "
+            f"descriptor source {descriptor.source!r}"
+        )
+    expected_result_identifier = primary_identifier_for_provider(row.provider)
+    if (
+        expected_result_identifier is not None
+        and descriptor.result_identifier != expected_result_identifier
+    ):
+        raise ValidationError(
+            f"{record_type} {row.key!r} provider {row.provider!r} requires result identifier "
+            f"{expected_result_identifier!r}"
+        )
+    if descriptor.result_identifier in row.identifiers:
+        raise ValidationError(
+            f"{record_type} {row.key!r} duplicates primary result identifier "
+            f"{descriptor.result_identifier!r} in peer identifiers"
         )
 
 
-def _prepare_rows(rows: Iterable[RecognitionRow]) -> list[RecognitionRow]:
+def _prepare_rows(
+    rows: Iterable[RecognitionRow],
+    descriptor: CatalogDescriptor,
+) -> list[RecognitionRow]:
     normalized: list[RecognitionRow] = []
     seen_keys: set[str] = set()
     for raw_row in rows:
         row = RecognitionRow.from_artifact_records(
             raw_row.minimal_record(),
             raw_row.state_record(),
+            provider=raw_row.provider,
             metadata=raw_row.metadata,
         )
+        _validate_result_identifier(row, descriptor, "source row")
         if row.key in seen_keys:
             raise ValidationError(f"duplicate key {row.key!r}")
         seen_keys.add(row.key)
@@ -1090,9 +1147,11 @@ def _build_deltas(
     delta_operations: list[dict[str, Any]] = []
     delta_embedding_rows: list[NDArray[np.float16]] = []
     previous_keys = set(previous_rows)
-    current_keys = {row.key for row in rows}
+    current_rows = {row.key: row for row in rows}
+    current_keys = set(current_rows)
     for key in sorted(previous_keys - current_keys):
-        delta_operations.append({"op": "delete", "key": key})
+        previous_row = previous_rows[key]
+        delta_operations.append({"op": "delete", **_identity_target(previous_row)})
     for index, row in enumerate(rows):
         previous_row = previous_rows.get(row.key)
         if previous_row is None or _requires_delta_upsert(previous_row, row):
@@ -1111,11 +1170,17 @@ def _build_deltas(
     current_metadata = {row.key: row.metadata for row in rows if row.metadata is not None}
     metadata_operations: list[dict[str, Any]] = []
     for key in sorted(set(previous_metadata) - set(current_metadata)):
-        metadata_operations.append({"op": "delete", "key": key})
+        metadata_operations.append(
+            {"op": "delete", **_identity_target(previous_rows[key])}
+        )
     for key in sorted(current_metadata):
         if previous_metadata.get(key) != current_metadata[key]:
             metadata_operations.append(
-                {"op": "upsert", "key": key, "metadata": current_metadata[key]}
+                {
+                    "op": "upsert",
+                    **_identity_target(current_rows[key]),
+                    "metadata": current_metadata[key],
+                }
             )
     if delta_embedding_rows:
         delta_embeddings = np.vstack(delta_embedding_rows).astype(np.float16, copy=False)
@@ -1196,7 +1261,7 @@ def _asset_info(filename: str, payload: bytes, content_type: str) -> AssetInfo:
     )
 
 
-def _canonical_json_bytes(payload: Mapping[str, Any]) -> bytes:
+def _canonical_json_bytes(payload: Any) -> bytes:
     return json.dumps(
         payload,
         allow_nan=False,
@@ -1206,7 +1271,7 @@ def _canonical_json_bytes(payload: Mapping[str, Any]) -> bytes:
     ).encode("utf-8")
 
 
-def _jsonl_bytes(records: Iterable[Mapping[str, Any]]) -> bytes:
+def _jsonl_bytes(records: Iterable[Any]) -> bytes:
     return b"".join(_canonical_json_bytes(record) + b"\n" for record in records)
 
 
@@ -1227,14 +1292,18 @@ def _load_jsonl_asset(
     manifest: CatalogManifest,
     asset_root: Path,
     asset_name: str,
-) -> list[dict[str, Any]]:
+) -> list[Any]:
     decoded = _read_decoded_gzip_asset(manifest, asset_root, asset_name)
     if not decoded:
         return []
-    records: list[dict[str, Any]] = []
+    records: list[Any] = []
     for line_number, line in enumerate(decoded.decode("utf-8").splitlines(), start=1):
-        payload = json.loads(line)
-        records.append(dict(_require_mapping(payload, f"{asset_name} line {line_number}")))
+        try:
+            records.append(json.loads(line))
+        except json.JSONDecodeError as error:
+            raise AssetIntegrityError(
+                f"{asset_name} line {line_number} is not valid JSON"
+            ) from error
     return records
 
 
@@ -1286,41 +1355,36 @@ def _read_verified_asset(path: Path, asset: AssetInfo) -> bytes:
     return payload
 
 
-def _load_state_map(rows: Sequence[Mapping[str, Any]]) -> dict[str, StateRecord]:
-    state_by_key: dict[str, StateRecord] = {}
-    for payload in rows:
-        state = StateRecord.from_dict(payload)
-        if state.key in state_by_key:
-            raise ValidationError(f"duplicate state entry for key {state.key!r}")
-        state_by_key[state.key] = state
-    return state_by_key
-
-
-def _load_metadata_map(rows: Sequence[Mapping[str, Any]]) -> dict[str, dict[str, JSONValue]]:
-    metadata_by_key: dict[str, dict[str, JSONValue]] = {}
-    for payload in rows:
-        key = _require_non_empty_string(payload.get("key"), "metadata.key")
-        metadata = _canonicalize_metadata(
-            _require_mapping(payload.get("metadata"), f"metadata[{key!r}]")
-        )
-        if key in metadata_by_key:
-            raise ValidationError(f"duplicate metadata entry for key {key!r}")
-        metadata_by_key[key] = metadata
-    return metadata_by_key
-
-
-def _load_metadata_delta(rows: Sequence[Mapping[str, Any]]) -> list[MetadataDeltaOperation]:
+def _load_metadata_delta(
+    rows: Sequence[Any],
+    *,
+    provider: str,
+) -> list[MetadataDeltaOperation]:
     metadata_operations: list[MetadataDeltaOperation] = []
     seen_keys: set[str] = set()
-    for payload in rows:
+    for raw_payload in rows:
+        payload = _require_mapping(raw_payload, "metadata delta operation")
         op_type = _require_non_empty_string(payload.get("op"), "metadata delta op")
-        key = _require_non_empty_string(payload.get("key"), "metadata delta key")
+        primary_id, face_index = _parse_identity_target(payload, "metadata delta")
+        key = catalog_row_key(provider, primary_id, face_index)
         if key in seen_keys:
             raise ValidationError(f"duplicate metadata delta operation for key {key!r}")
         seen_keys.add(key)
         if op_type == "delete":
+            _require_allowed_fields(
+                payload,
+                required={"op", "id"},
+                allowed={"op", "id", "face_index"},
+                name="metadata delta delete",
+            )
             metadata_operations.append(MetadataDelete(key=key))
         elif op_type == "upsert":
+            _require_allowed_fields(
+                payload,
+                required={"op", "id", "metadata"},
+                allowed={"op", "id", "face_index", "metadata"},
+                name="metadata delta upsert",
+            )
             metadata_operations.append(
                 MetadataUpsert(
                     key=key,
@@ -1334,17 +1398,86 @@ def _load_metadata_delta(rows: Sequence[Mapping[str, Any]]) -> list[MetadataDelt
     return metadata_operations
 
 
-def _iter_metadata_records(rows: Sequence[RecognitionRow]) -> Iterable[Mapping[str, Any]]:
+def _iter_metadata_records(
+    rows: Sequence[RecognitionRow],
+) -> Iterable[dict[str, JSONValue] | None]:
     for row in rows:
-        record = row.metadata_record()
-        if record is not None:
-            yield record
+        yield row.metadata
 
 
 def _require_mapping(value: Any, name: str) -> Mapping[str, Any]:
     if not isinstance(value, Mapping):
         raise ValidationError(f"{name} must be a mapping")
     return value
+
+
+def _require_allowed_fields(
+    payload: Mapping[str, Any],
+    *,
+    required: set[str],
+    allowed: set[str],
+    name: str,
+) -> None:
+    missing = required.difference(payload)
+    extra = set(payload).difference(allowed)
+    if missing or extra:
+        raise ValidationError(
+            f"{name} fields must include {sorted(required)} and be limited to "
+            f"{sorted(allowed)}"
+        )
+
+
+def _require_exact_fields(
+    payload: Mapping[str, Any],
+    expected: set[str],
+    name: str,
+) -> None:
+    if set(payload) != expected:
+        raise ValidationError(f"{name} fields must be exactly {sorted(expected)}")
+
+
+def catalog_row_key(provider: str, primary_id: str, face_index: int = 0) -> str:
+    provider = _identity_component(provider, "provider")
+    primary_id = _identity_component(primary_id, "id")
+    if not isinstance(face_index, int) or isinstance(face_index, bool) or face_index < 0:
+        raise ValidationError("face_index must be a non-negative integer")
+    base = f"{provider}:{primary_id}"
+    return base if face_index == 0 else f"{base}:face:{face_index}"
+
+
+def primary_identifier_for_provider(provider: str) -> str | None:
+    return _PRIMARY_IDENTIFIERS.get(provider)
+
+
+def _identity_target(row: RecognitionRow) -> dict[str, Any]:
+    target: dict[str, Any] = {"id": row.id}
+    if row.face_index:
+        target["face_index"] = row.face_index
+    return target
+
+
+def _parse_identity_target(
+    payload: Mapping[str, Any],
+    name: str,
+) -> tuple[str, int]:
+    primary_id = _identity_component(payload.get("id"), f"{name} id")
+    face_index = payload.get("face_index", 0)
+    if (
+        not isinstance(face_index, int)
+        or isinstance(face_index, bool)
+        or face_index < 0
+    ):
+        raise ValidationError(f"{name} face_index must be a non-negative integer")
+    if face_index == 0 and "face_index" in payload:
+        raise ValidationError(f"{name} must omit face_index for face 0")
+    return primary_id, face_index
+
+
+def _identity_component(value: Any, name: str) -> str:
+    component = _require_non_empty_string(value, name)
+    if ":" in component:
+        raise ValidationError(f"{name} must not contain ':'")
+    return component
 
 
 def _require_non_empty_string(value: Any, name: str) -> str:

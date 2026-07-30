@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import gzip
 import json
+from dataclasses import replace
 from hashlib import sha256
 from pathlib import Path
 
@@ -72,7 +73,7 @@ def _build_initial_catalog(
     return build, build_dir, embedder, loader
 
 
-def _read_gzip_jsonl(path: Path) -> list[dict[str, object]]:
+def _read_gzip_jsonl(path: Path) -> list[object]:
     payload = gzip.decompress(path.read_bytes()).decode("utf-8")
     if not payload:
         return []
@@ -82,7 +83,7 @@ def _read_gzip_jsonl(path: Path) -> list[dict[str, object]]:
 def _replace_gzip_jsonl_asset(
     manifest_path: Path,
     asset_name: str,
-    records: list[dict[str, object]],
+    records: list[object],
 ) -> None:
     manifest_payload = json.loads(manifest_path.read_text(encoding="utf-8"))
     asset = manifest_payload["assets"][asset_name]
@@ -172,7 +173,7 @@ def test_build_outputs_are_deterministic_and_loadable(workspace: Path) -> None:
     assert build_a.manifest.to_dict() == build_b.manifest.to_dict()
     assert loaded.manifest.catalog_key == CATALOG_KEY
     assert loaded.manifest.embedding_model == EMBEDDING_MODEL
-    assert [row.key for row in loaded.rows] == ["alpha", "beta"]
+    assert [row.key for row in loaded.rows] == ["test-source:alpha", "test-source:beta"]
     assert loaded.embeddings.dtype == np.float16
     assert loaded.embeddings.shape == (2, 4)
     assert np.allclose(
@@ -190,6 +191,57 @@ def test_build_outputs_are_deterministic_and_loadable(workspace: Path) -> None:
         "image_url" not in record and "image_fingerprint" not in record
         for record in recognition_records
     )
+
+
+def test_base_rows_are_minimal_and_line_aligned(workspace: Path) -> None:
+    rows = [
+        make_row(
+            "card",
+            "memory://front",
+            "front-fingerprint",
+            identifiers={"peer": "peer-1"},
+            metadata={"name": "Front"},
+        ),
+        make_row(
+            "test-source:card:face:1",
+            "memory://back",
+            "back-fingerprint",
+            identifiers={"peer": "peer-1"},
+        ),
+    ]
+    build = build_catalog(
+        rows,
+        embedder=TrackingEmbedder(),
+        image_loader=TrackingImageLoader(
+            {"memory://front": (255, 0, 0), "memory://back": (0, 0, 255)}
+        ),
+        output_dir=workspace / "aligned",
+        catalog_key=CATALOG_KEY,
+        version="v1",
+        embedding_model=EMBEDDING_MODEL,
+    )
+
+    assert _read_gzip_jsonl(
+        workspace / "aligned" / build.manifest.assets["identifiers"].filename
+    ) == [
+        {"id": "card", "identifiers": {"peer": "peer-1"}},
+        {"id": "card", "identifiers": {"peer": "peer-1"}, "face_index": 1},
+    ]
+    assert _read_gzip_jsonl(
+        workspace / "aligned" / build.manifest.assets["metadata"].filename
+    ) == [{"name": "Front"}, None]
+    assert _read_gzip_jsonl(
+        workspace / "aligned" / build.manifest.assets["state_rows"].filename
+    ) == [
+        {
+            "image_url": "memory://front",
+            "image_fingerprint": "front-fingerprint",
+        },
+        {
+            "image_url": "memory://back",
+            "image_fingerprint": "back-fingerprint",
+        },
+    ]
 
 
 def test_reuses_previous_embeddings_on_metadata_only_change(workspace: Path) -> None:
@@ -215,7 +267,7 @@ def test_reuses_previous_embeddings_on_metadata_only_change(workspace: Path) -> 
         ),
         make_row("beta", "memory://beta", "fp-beta", metadata={"name": "Beta"}),
     ]
-    build_catalog(
+    build = build_catalog(
         rows_v2,
         embedder=embedder,
         image_loader=loader,
@@ -233,6 +285,15 @@ def test_reuses_previous_embeddings_on_metadata_only_change(workspace: Path) -> 
     assert loader.calls == []
     assert len(delta.operations) == 0
     assert len(delta.metadata_operations) == 1
+    assert _read_gzip_jsonl(
+        workspace / "metadata-only" / build.manifest.assets["metadata_delta"].filename
+    ) == [
+        {
+            "op": "upsert",
+            "id": "alpha",
+            "metadata": {"name": "Alpha", "rarity": "rare"},
+        }
+    ]
 
 
 def test_seed_embeddings_reuse_initial_rows_and_keep_artifacts_valid(workspace: Path) -> None:
@@ -254,7 +315,9 @@ def test_seed_embeddings_reuse_initial_rows_and_keep_artifacts_valid(workspace: 
         catalog_key=CATALOG_KEY,
         version="v1",
         embedding_model=EMBEDDING_MODEL,
-        seed_embeddings={"alpha": _normalized_embedding_for_color(image_map["memory://alpha"])},
+        seed_embeddings={
+            "test-source:alpha": _normalized_embedding_for_color(image_map["memory://alpha"])
+        },
     )
 
     manifest_path = workspace / "seeded" / manifest_filename_for_catalog(CATALOG_KEY)
@@ -278,7 +341,7 @@ def test_seed_embeddings_reuse_initial_rows_and_keep_artifacts_valid(workspace: 
     )
 
 
-def test_legacy_empty_delta_assets_remain_readable(workspace: Path) -> None:
+def test_empty_delta_assets_are_rejected(workspace: Path) -> None:
     build = build_catalog(
         [make_row("alpha", "memory://alpha", "fp-alpha")],
         embedder=TrackingEmbedder(),
@@ -298,15 +361,17 @@ def test_legacy_empty_delta_assets_remain_readable(workspace: Path) -> None:
         }
     )
 
-    assert CatalogManifest.from_dict(payload).delta.operations == 0
+    with pytest.raises(ValidationError, match="without identifier delta operations"):
+        CatalogManifest.from_dict(payload)
 
 
-def test_identifiers_serialize_and_result_identifier_is_required(workspace: Path) -> None:
-    row = make_row(
-        "alpha",
-        "memory://alpha",
-        "fp-alpha",
-        identifiers={"scryfall_card": "card-1", "scryfall_oracle": "oracle-1"},
+def test_identifiers_serialize_without_primary_identifier(workspace: Path) -> None:
+    row = RecognitionRow(
+        provider="scryfall",
+        id="card-1",
+        identifiers={"scryfall_oracle": "oracle-1"},
+        image_url="memory://alpha",
+        image_fingerprint="fp-alpha",
     )
     descriptor = CatalogDescriptor(
         game="magic-the-gathering",
@@ -326,16 +391,15 @@ def test_identifiers_serialize_and_result_identifier_is_required(workspace: Path
         embedding_model=EMBEDDING_MODEL,
         descriptor=descriptor,
     )
-    assert build.rows[0].minimal_record()["identifiers"] == {
-        "scryfall_card": "card-1",
-        "scryfall_oracle": "oracle-1",
-        "test": "alpha",
+    assert build.rows[0].minimal_record() == {
+        "id": "card-1",
+        "identifiers": {"scryfall_oracle": "oracle-1"},
     }
     assert build.manifest.descriptor == descriptor
 
-    with pytest.raises(ValidationError, match="missing result identifier"):
+    with pytest.raises(ValidationError, match="duplicates primary result identifier"):
         build_catalog(
-            [row],
+            [replace(row, identifiers={"scryfall_card": "card-1"})],
             embedder=TrackingEmbedder(),
             image_loader=TrackingImageLoader({"memory://alpha": (255, 0, 0)}),
             output_dir=workspace / "invalid-identifiers",
@@ -347,12 +411,61 @@ def test_identifiers_serialize_and_result_identifier_is_required(workspace: Path
                 source="scryfall",
                 profile="cards",
                 description="Test cards.",
-                result_identifier="missing_identifier",
+                result_identifier="scryfall_card",
             ),
         )
 
 
-def test_loader_enforces_manifest_result_identifier(workspace: Path) -> None:
+def test_known_provider_requires_its_primary_identifier_namespace(workspace: Path) -> None:
+    row = RecognitionRow(
+        provider="scryfall",
+        id="card-1",
+        identifiers={},
+        image_url="memory://alpha",
+        image_fingerprint="fp-alpha",
+    )
+
+    with pytest.raises(ValidationError, match="requires result identifier 'scryfall_card'"):
+        build_catalog(
+            [row],
+            embedder=TrackingEmbedder(),
+            image_loader=TrackingImageLoader({"memory://alpha": (255, 0, 0)}),
+            output_dir=workspace / "wrong-primary-namespace",
+            catalog_key=CATALOG_KEY,
+            version="v1",
+            embedding_model=EMBEDDING_MODEL,
+            descriptor=CatalogDescriptor(
+                game="magic-the-gathering",
+                source="scryfall",
+                profile="cards",
+                description="Test cards.",
+                result_identifier="tcgplayer_product",
+            ),
+        )
+
+
+def test_primary_identity_components_cannot_contain_separator(workspace: Path) -> None:
+    row = RecognitionRow(
+        provider="test-source",
+        id="ambiguous:face:1",
+        identifiers={},
+        image_url="memory://alpha",
+        image_fingerprint="fp-alpha",
+    )
+
+    with pytest.raises(ValidationError, match="id must not contain ':'"):
+        build_catalog(
+            [row],
+            embedder=TrackingEmbedder(),
+            image_loader=TrackingImageLoader({"memory://alpha": (255, 0, 0)}),
+            output_dir=workspace / "ambiguous-id",
+            catalog_key=CATALOG_KEY,
+            version="v1",
+            embedding_model=EMBEDDING_MODEL,
+        )
+
+
+def test_loader_rejects_duplicated_primary_result_identifier(workspace: Path) -> None:
     rows = [make_row("alpha", "memory://alpha", "fp-alpha")]
     _, build_dir, _, _ = _build_initial_catalog(
         workspace,
@@ -362,10 +475,10 @@ def test_loader_enforces_manifest_result_identifier(workspace: Path) -> None:
     manifest_path = build_dir / manifest_filename_for_catalog(CATALOG_KEY)
     recognition_path = build_dir / "milo1--scryfall--mtg.identifiers.jsonl.gz"
     recognition_records = _read_gzip_jsonl(recognition_path)
-    recognition_records[0]["identifiers"] = {"other": "alpha"}
+    recognition_records[0]["identifiers"] = {"test": "alpha"}
     _replace_gzip_jsonl_asset(manifest_path, "identifiers", recognition_records)
 
-    with pytest.raises(ValidationError, match="missing result identifier 'test'"):
+    with pytest.raises(ValidationError, match="duplicates primary result identifier 'test'"):
         load_catalog_build(manifest_path)
 
 
@@ -405,19 +518,19 @@ def test_seed_embeddings_reject_unknown_keys(workspace: Path) -> None:
     ("seed_embeddings", "message"),
     [
         (
-            {"alpha": np.array([np.nan, 0.0, 0.0, 0.0], dtype=np.float32)},
-            "seed_embeddings\\['alpha'\\] embeddings must contain only finite values",
+            {"test-source:alpha": np.array([np.nan, 0.0, 0.0, 0.0], dtype=np.float32)},
+            "seed_embeddings\\['test-source:alpha'\\] embeddings must contain only finite values",
         ),
         (
-            {"alpha": np.ones(4, dtype=np.float32)},
-            "seed_embeddings\\['alpha'\\] embeddings must be L2-normalized",
+            {"test-source:alpha": np.ones(4, dtype=np.float32)},
+            "seed_embeddings\\['test-source:alpha'\\] embeddings must be L2-normalized",
         ),
         (
             {
-                "alpha": _normalized_embedding_for_color((255, 0, 0)),
-                "beta": np.array([1.0, 0.0, 0.0], dtype=np.float32),
+                "test-source:alpha": _normalized_embedding_for_color((255, 0, 0)),
+                "test-source:beta": np.array([1.0, 0.0, 0.0], dtype=np.float32),
             },
-            "seed_embeddings\\['beta'\\] returned dimension 3 but expected 4",
+            "seed_embeddings\\['test-source:beta'\\] returned dimension 3 but expected 4",
         ),
     ],
 )
@@ -461,7 +574,7 @@ def test_seed_embeddings_cannot_be_combined_with_previous_build(workspace: Path)
             catalog_key=CATALOG_KEY,
             version="v2",
             embedding_model=EMBEDDING_MODEL,
-            seed_embeddings={"alpha": _normalized_embedding_for_color((255, 0, 0))},
+            seed_embeddings={"test-source:alpha": _normalized_embedding_for_color((255, 0, 0))},
             previous_build=previous,
         )
 
@@ -586,15 +699,26 @@ def test_apply_delta_roundtrip_with_add_delete_and_minimal_change(workspace: Pat
     delta = load_delta_bundle(target_manifest)
     reconstructed = apply_delta(previous, target_manifest)
     loaded_target = validate_artifacts(target_manifest, previous_build=previous)
+    identifier_delta = _read_gzip_jsonl(
+        workspace
+        / "delta-target"
+        / loaded_target.manifest.assets["identifiers_delta"].filename
+    )
+    metadata_delta = _read_gzip_jsonl(
+        workspace / "delta-target" / loaded_target.manifest.assets["metadata_delta"].filename
+    )
 
     assert loader.calls == ["memory://gamma"]
     assert len(delta.operations) == 3
+    assert identifier_delta[0] == {"op": "delete", "id": "alpha"}
+    assert all("key" not in operation for operation in identifier_delta)
+    assert all("key" not in operation for operation in metadata_delta)
     assert (
         [row.key for row in reconstructed.rows]
         == [row.key for row in loaded_target.rows]
         == [
-            "beta",
-            "gamma",
+            "test-source:beta",
+            "test-source:gamma",
         ]
     )
     assert [row.minimal_record() for row in reconstructed.rows] == [
@@ -637,6 +761,23 @@ def test_loader_rejects_corruption_and_truncation(workspace: Path) -> None:
         load_catalog_build(manifest_path)
 
 
+def test_loader_rejects_unaligned_base_layers(workspace: Path) -> None:
+    rows = [
+        make_row("alpha", "memory://alpha", "fp-alpha"),
+        make_row("beta", "memory://beta", "fp-beta"),
+    ]
+    _, build_dir, _, _ = _build_initial_catalog(
+        workspace,
+        rows,
+        {"memory://alpha": (255, 0, 0), "memory://beta": (0, 255, 0)},
+    )
+    manifest_path = build_dir / manifest_filename_for_catalog(CATALOG_KEY)
+    _replace_gzip_jsonl_asset(manifest_path, "metadata", [None])
+
+    with pytest.raises(ValidationError, match="metadata rows must be line-aligned"):
+        load_catalog_build(manifest_path)
+
+
 @pytest.mark.parametrize(
     ("rows", "embedder", "message"),
     [
@@ -647,7 +788,7 @@ def test_loader_rejects_corruption_and_truncation(workspace: Path) -> None:
                 make_row("dup", "memory://beta", "fp-b"),
             ],
             TrackingEmbedder(),
-            "duplicate key 'dup'",
+            "duplicate key 'test-source:dup'",
         ),
         (
             [make_row("alpha", "memory://alpha", "fp-alpha")],

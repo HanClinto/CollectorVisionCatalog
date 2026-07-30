@@ -13,7 +13,7 @@ _IMAGE_PREFERENCE = ("png", "large", "normal")
 def normalize_scryfall_card(card: Mapping[str, Any]) -> list[RecognitionRow]:
     card_id = _require_uuid(card.get("id"), "id")
     _require_string(card.get("name"), "name")
-    identifiers = {"scryfall_card": card_id}
+    identifiers: dict[str, str] = {}
     if (oracle_id := card.get("oracle_id")) not in (None, ""):
         identifiers["scryfall_oracle"] = _require_uuid(oracle_id, "oracle_id")
     for field_name, source_name in (
@@ -46,11 +46,12 @@ def normalize_scryfall_card(card: Mapping[str, Any]) -> list[RecognitionRow]:
                 continue
             rows.append(
                 RecognitionRow(
-                    key=f"scryfall:{card_id}:face:{index}",
+                    provider="scryfall",
+                    id=card_id,
                     identifiers=dict(sorted(identifiers.items())),
-                    face_index=index,
                     image_url=image_url,
                     image_fingerprint=_fingerprint(image_url),
+                    face_index=index,
                     metadata=dict(metadata),
                 )
             )
@@ -61,9 +62,9 @@ def normalize_scryfall_card(card: Mapping[str, Any]) -> list[RecognitionRow]:
         return []
     return [
         RecognitionRow(
-            key=f"scryfall:{card_id}:face:0",
+            provider="scryfall",
+            id=card_id,
             identifiers=dict(sorted(identifiers.items())),
-            face_index=0,
             image_url=image_url,
             image_fingerprint=_fingerprint(image_url),
             metadata=metadata,

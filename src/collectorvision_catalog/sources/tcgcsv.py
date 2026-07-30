@@ -29,7 +29,7 @@ def normalize_tcgcsv_product(
     if image_count < 0:
         raise ValidationError("tcgcsv imageCount must not be negative")
     extended_data = extract_extended_data(product)
-    identifiers: dict[str, str] = {"tcgplayer_product": product_id}
+    identifiers: dict[str, str] = {}
     if group is not None:
         group_id = _lookup(group, "groupId", "groupID", "group_id")
         if group_id is not None:
@@ -60,13 +60,14 @@ def normalize_tcgcsv_product(
     ):
         rows.append(
             RecognitionRow(
-                key=f"tcgplayer:{product_id}:face:{index}",
+                provider="tcgplayer",
+                id=product_id,
                 identifiers=dict(sorted(identifiers.items())),
-                face_index=index,
                 image_url=image_url,
                 image_fingerprint=_fingerprint(
                     f"{image_url}|{_lookup(product, 'modifiedOn', 'modified_on') or ''}"
                 ),
+                face_index=index,
                 metadata=dict(metadata),
             )
         )
