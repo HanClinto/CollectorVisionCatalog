@@ -56,21 +56,22 @@ def test_initial_version_publishes_only_readable_base_paths(workspace: Path) -> 
     assert path.read_text().startswith('{\n  "catalog_key":')
     assert manifest.delta is None
     assert manifest.base is not None
-    assert set(manifest.base) == {"embeddings", "identifiers", "metadata"}
-    assert {asset.rows for asset in manifest.base.values()} == {1}
+    assert manifest.base.rows == 1
+    assert set(manifest.base.recognition) == {"embeddings", "identifiers"}
+    assert set(manifest.base.metadata) == {"records"}
     assert {
-        asset.path for asset in manifest.base.values()
+        asset.path for asset in manifest.base.assets.values()
     } == {
         "base/embeddings.f16.gz",
         "base/identifiers.jsonl.gz",
         "base/metadata.jsonl.gz",
     }
-    for asset in manifest.base.values():
+    for asset in manifest.base.assets.values():
         assert (path.parent / asset.path).is_file()
     assert load_catalog_version_manifest(path) == manifest
 
 
-def test_public_manifest_requires_line_aligned_metadata(workspace: Path) -> None:
+def test_public_manifest_requires_positive_base_rows(workspace: Path) -> None:
     build, build_dir = _build(workspace, 0)
     manifest, _ = publish_catalog_version(
         build,
@@ -80,9 +81,41 @@ def test_public_manifest_requires_line_aligned_metadata(workspace: Path) -> None
         plan_catalog_version(None),
     )
     payload = manifest.to_dict()
-    payload["base"]["metadata"]["rows"] = 0
+    payload["base"]["rows"] = 0
 
-    with pytest.raises(ValidationError, match="metadata and identifiers must have equal rows"):
+    with pytest.raises(ValidationError, match="base.rows must be a positive integer"):
+        CatalogVersionManifest.from_dict(payload)
+
+
+def test_public_manifest_base_rows_match_catalog_rows(workspace: Path) -> None:
+    build, build_dir = _build(workspace, 0)
+    manifest, _ = publish_catalog_version(
+        build,
+        build_dir,
+        workspace / "public",
+        "scryfall-mtg",
+        plan_catalog_version(None),
+    )
+    payload = manifest.to_dict()
+    payload["base"]["rows"] += 1
+
+    with pytest.raises(ValidationError, match="base.rows must match manifest rows"):
+        CatalogVersionManifest.from_dict(payload)
+
+
+def test_public_manifest_rejects_removed_asset_rows(workspace: Path) -> None:
+    build, build_dir = _build(workspace, 0)
+    manifest, _ = publish_catalog_version(
+        build,
+        build_dir,
+        workspace / "public",
+        "scryfall-mtg",
+        plan_catalog_version(None),
+    )
+    payload = manifest.to_dict()
+    payload["base"]["recognition"]["assets"]["identifiers"]["rows"] = 1
+
+    with pytest.raises(ValidationError, match="published asset fields"):
         CatalogVersionManifest.from_dict(payload)
 
 
@@ -102,19 +135,15 @@ def test_incremental_version_publishes_only_delta(workspace: Path) -> None:
     assert manifest.base is None
     assert manifest.delta is not None
     assert manifest.delta.from_version == 0
-    assert manifest.delta.rows == 1
-    assert manifest.delta.recognition.to_dict() == {
+    assert manifest.delta.rows.to_dict() == {
         "added": 0,
         "updated": 1,
         "deleted": 0,
     }
-    assert manifest.delta.metadata.to_dict() == {
-        "added": 0,
-        "updated": 1,
-        "deleted": 0,
-    }
-    assert set(manifest.delta.assets) == {"embeddings", "identifiers", "metadata"}
-    assert {asset.rows for asset in manifest.delta.assets.values()} == {1}
+    assert manifest.delta.recognition.rows == 1
+    assert manifest.delta.metadata.rows == 1
+    assert set(manifest.delta.recognition.assets) == {"embeddings", "identifiers"}
+    assert set(manifest.delta.metadata.assets) == {"records"}
     assert not (path.parent / "base").exists()
     assert (path.parent / "delta-from-0/embeddings.f16.gz").is_file()
 
@@ -194,19 +223,15 @@ def test_delete_only_delta_does_not_require_embeddings(workspace: Path) -> None:
     )
 
     assert manifest.delta is not None
-    assert manifest.delta.rows == 1
-    assert manifest.delta.recognition.to_dict() == {
+    assert manifest.delta.rows.to_dict() == {
         "added": 0,
         "updated": 0,
         "deleted": 1,
     }
-    assert manifest.delta.metadata.to_dict() == {
-        "added": 0,
-        "updated": 0,
-        "deleted": 0,
-    }
-    assert set(manifest.delta.assets) == {"identifiers"}
-    assert manifest.delta.assets["identifiers"].rows == 1
+    assert manifest.delta.recognition.rows == 1
+    assert manifest.delta.metadata.rows == 0
+    assert set(manifest.delta.recognition.assets) == {"identifiers"}
+    assert manifest.delta.metadata.assets == {}
     assert load_catalog_version_manifest(path) == manifest
 
 
@@ -241,15 +266,15 @@ def test_metadata_only_delta_omits_recognition_assets(workspace: Path) -> None:
     )
 
     assert manifest.delta is not None
-    assert manifest.delta.rows == 1
-    assert manifest.delta.recognition.total == 0
-    assert manifest.delta.metadata.to_dict() == {
+    assert manifest.delta.rows.to_dict() == {
         "added": 0,
         "updated": 1,
         "deleted": 0,
     }
-    assert set(manifest.delta.assets) == {"metadata"}
-    assert manifest.delta.assets["metadata"].rows == 1
+    assert manifest.delta.recognition.rows == 0
+    assert manifest.delta.recognition.assets == {}
+    assert manifest.delta.metadata.rows == 1
+    assert set(manifest.delta.metadata.assets) == {"records"}
     assert load_catalog_version_manifest(path) == manifest
 
 

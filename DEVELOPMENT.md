@@ -19,7 +19,10 @@ layout are implemented. The remaining Catalog v2 cutover work is:
 
 The builder now emits compact primary `id` plus optional `face_index` records
 with line-aligned metadata. The currently published beta still uses the prior
-row layout and will be regenerated after the remaining contract review.
+row and immutable-manifest layouts and will be regenerated after the remaining
+contract review. Update the Catalog Explorer's artifact parser alongside that
+regeneration; the live explorer intentionally continues to read the currently
+published immutable manifests.
 
 Catalog v2 is unreleased, so discarded prototypes do not require compatibility
 aliases or fallback parsers. Catalog v1 must remain unchanged.

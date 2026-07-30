@@ -16,7 +16,6 @@ from .artifacts import (
     normalize_rfc3339_utc,
 )
 from .publication import (
-    BASE_ASSETS,
     CatalogVersionManifest,
     ChangeCounts,
     PublishedAsset,
@@ -93,49 +92,16 @@ class FileReference:
         return cls(url=url, sha256=checksum, size=size)
 
 
-@dataclass(frozen=True)
-class AssetReference:
-    url: str
-    sha256: str
-    size: int
-    rows: int
-
-    @property
-    def filename(self) -> str:
-        return PurePosixPath(unquote(urlparse(self.url).path)).name
-
-    def to_dict(self) -> dict[str, str | int]:
-        return {
-            "url": self.url,
-            "rows": self.rows,
-            "size": self.size,
-            "sha256": self.sha256,
-        }
-
-    @classmethod
-    def from_dict(cls, payload: Mapping[str, Any]) -> AssetReference:
-        _exact_keys(payload, {"url", "sha256", "size", "rows"}, "feed asset reference")
-        file = FileReference.from_dict(
-            {key: payload[key] for key in ("url", "sha256", "size")}
-        )
-        return cls(
-            url=file.url,
-            sha256=file.sha256,
-            size=file.size,
-            rows=_version(payload.get("rows"), "feed asset rows"),
-        )
-
-
 def _assets_from_dict(
     payload: Mapping[str, Any], *, name: str, allowed: set[str], required: set[str]
-) -> dict[str, AssetReference]:
+) -> dict[str, FileReference]:
     assets_payload = _require_mapping(payload.get("assets"), f"{name} assets")
     if not required.issubset(assets_payload) or not set(assets_payload).issubset(allowed):
         raise ValidationError(
             f"{name} assets must contain {sorted(required)} and only {sorted(allowed)}"
         )
     return {
-        _require_non_empty_string(key, f"{name} asset key"): AssetReference.from_dict(
+        _require_non_empty_string(key, f"{name} asset key"): FileReference.from_dict(
             _require_mapping(value, f"{name} asset {key!r}")
         )
         for key, value in assets_payload.items()
@@ -143,64 +109,121 @@ def _assets_from_dict(
 
 
 @dataclass(frozen=True)
+class LayerReference:
+    rows: int
+    assets: dict[str, FileReference]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "rows": self.rows,
+            "assets": {key: value.to_dict() for key, value in sorted(self.assets.items())},
+        }
+
+    @classmethod
+    def from_dict(
+        cls,
+        payload: Mapping[str, Any],
+        *,
+        name: str,
+        allowed: set[str],
+    ) -> LayerReference:
+        _exact_keys(payload, {"rows", "assets"}, name)
+        rows = _version(payload.get("rows"), f"{name} rows")
+        assets = _assets_from_dict(payload, name=name, allowed=allowed, required=set())
+        if bool(rows) != bool(assets):
+            raise ValidationError(f"{name} rows and assets must both be empty or non-empty")
+        return cls(rows=rows, assets=assets)
+
+
+@dataclass(frozen=True)
 class SnapshotReference:
     version: int
     rows: int
     manifest: FileReference
-    assets: dict[str, AssetReference]
+    recognition: dict[str, FileReference]
+    metadata: dict[str, FileReference]
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "version": self.version,
             "rows": self.rows,
             "manifest": self.manifest.to_dict(),
-            "assets": {key: value.to_dict() for key, value in sorted(self.assets.items())},
+            "recognition": {
+                "assets": {
+                    key: value.to_dict() for key, value in sorted(self.recognition.items())
+                }
+            },
+            "metadata": {
+                "assets": {
+                    key: value.to_dict() for key, value in sorted(self.metadata.items())
+                }
+            },
         }
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> SnapshotReference:
-        _exact_keys(payload, {"version", "rows", "manifest", "assets"}, "feed base")
+        _exact_keys(
+            payload,
+            {"version", "rows", "manifest", "recognition", "metadata"},
+            "feed base",
+        )
         snapshot = cls(
             version=_version(payload.get("version"), "feed base version"),
             rows=_version(payload.get("rows"), "feed base rows"),
             manifest=FileReference.from_dict(
                 _require_mapping(payload.get("manifest"), "feed base manifest")
             ),
-            assets=_assets_from_dict(
-                payload,
-                name="feed base",
-                allowed=set(BASE_ASSETS),
-                required=set(BASE_ASSETS),
+            recognition=_assets_from_dict(
+                _require_mapping(payload.get("recognition"), "feed base recognition"),
+                name="feed base recognition",
+                allowed={"embeddings", "identifiers"},
+                required={"embeddings", "identifiers"},
+            ),
+            metadata=_assets_from_dict(
+                _require_mapping(payload.get("metadata"), "feed base metadata"),
+                name="feed base metadata",
+                allowed={"records"},
+                required={"records"},
             ),
         )
-        if (
-            snapshot.assets["embeddings"].rows != snapshot.rows
-            or snapshot.assets["identifiers"].rows != snapshot.rows
-            or snapshot.assets["metadata"].rows > snapshot.rows
-        ):
-            raise ValidationError("feed base asset rows do not match base rows")
         return snapshot
+
+    @property
+    def assets(self) -> dict[str, FileReference]:
+        return {
+            **self.recognition,
+            "metadata": self.metadata["records"],
+        }
 
 
 @dataclass(frozen=True)
 class DeltaReference:
     from_version: int
     to_version: int
-    rows: int
-    recognition: ChangeCounts
-    metadata: ChangeCounts
+    rows: ChangeCounts
+    recognition: LayerReference
+    metadata: LayerReference
     manifest: FileReference
-    assets: dict[str, AssetReference]
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "from_version": self.from_version,
             "to_version": self.to_version,
-            "rows": self.rows,
+            "rows": self.rows.to_dict(),
+            "manifest": self.manifest.to_dict(),
             "recognition": self.recognition.to_dict(),
             "metadata": self.metadata.to_dict(),
-            "manifest": self.manifest.to_dict(),
-            "assets": {key: value.to_dict() for key, value in sorted(self.assets.items())},
+        }
+
+    @property
+    def assets(self) -> dict[str, FileReference]:
+        return {
+            **self.recognition.assets,
+            **(
+                {"metadata": self.metadata.assets["records"]}
+                if "records" in self.metadata.assets
+                else {}
+            ),
         }
 
     @classmethod
@@ -214,15 +237,9 @@ class DeltaReference:
                 "recognition",
                 "metadata",
                 "manifest",
-                "assets",
             },
             "feed delta",
         )
-        assets = _assets_from_dict(
-            payload, name="feed delta", allowed=set(BASE_ASSETS), required=set()
-        )
-        if not assets:
-            raise ValidationError("feed delta must contain at least one asset")
         from_version = _version(payload.get("from_version"), "feed delta from_version")
         to_version = _version(payload.get("to_version"), "feed delta to_version")
         if to_version != from_version + 1:
@@ -230,19 +247,23 @@ class DeltaReference:
         delta = cls(
             from_version=from_version,
             to_version=to_version,
-            rows=_version(payload.get("rows"), "feed delta rows"),
-            recognition=ChangeCounts.from_dict(
-                _require_mapping(payload.get("recognition"), "feed delta recognition"),
-                "feed delta recognition",
+            rows=ChangeCounts.from_dict(
+                _require_mapping(payload.get("rows"), "feed delta rows"),
+                "feed delta rows",
             ),
-            metadata=ChangeCounts.from_dict(
+            recognition=LayerReference.from_dict(
+                _require_mapping(payload.get("recognition"), "feed delta recognition"),
+                name="feed delta recognition",
+                allowed={"embeddings", "identifiers"},
+            ),
+            metadata=LayerReference.from_dict(
                 _require_mapping(payload.get("metadata"), "feed delta metadata"),
-                "feed delta metadata",
+                name="feed delta metadata",
+                allowed={"records"},
             ),
             manifest=FileReference.from_dict(
                 _require_mapping(payload.get("manifest"), "feed delta manifest")
             ),
-            assets=assets,
         )
         _validate_delta_rows(delta)
         return delta
@@ -326,9 +347,9 @@ class CatalogFeedEntry:
         expected_rows = entry.base.rows
         for update in entry.updates.values():
             if update.from_version >= entry.base.version:
-                expected_rows += update.recognition.added - update.recognition.deleted
+                expected_rows += update.rows.added - update.rows.deleted
         if entry.rows != expected_rows:
-            raise ValidationError("feed catalog rows do not match its base and deltas")
+            raise ValidationError("feed catalog rows do not match its base and updates")
         return entry
 
 
@@ -409,9 +430,14 @@ def update_catalog_feed(
         base_path = Path(records[base_index][0])
         base = SnapshotReference(
             version=base_manifest.version,
-            rows=base_manifest.rows,
+            rows=base_manifest.base.rows,
             manifest=_file_reference(base_path, public_name, base_manifest.version, base_path.name),
-            assets=_asset_references(public_name, base_manifest.version, base_manifest.base or {}),
+            recognition=_asset_references(
+                public_name, base_manifest.version, base_manifest.base.recognition
+            ),
+            metadata=_asset_references(
+                public_name, base_manifest.version, base_manifest.base.metadata
+            ),
         )
         delta_indexes = list(range(base_index + 1, len(manifests)))
         if base_manifest.delta is not None:
@@ -471,14 +497,13 @@ def _file_reference(
 
 def _asset_references(
     public_name: str, version: int, assets: Mapping[str, PublishedAsset]
-) -> dict[str, AssetReference]:
+) -> dict[str, FileReference]:
     return {
-        name: AssetReference.from_dict(
+        name: FileReference.from_dict(
             {
                 "url": _url(public_name, version, asset.path),
                 "sha256": asset.sha256,
                 "size": asset.size,
-                "rows": asset.rows,
             }
         )
         for name, asset in sorted(assets.items())
@@ -492,10 +517,23 @@ def _delta_reference(path: Path, manifest: CatalogVersionManifest) -> DeltaRefer
         from_version=manifest.delta.from_version,
         to_version=manifest.version,
         rows=manifest.delta.rows,
-        recognition=manifest.delta.recognition,
-        metadata=manifest.delta.metadata,
         manifest=_file_reference(path, manifest.public_name, manifest.version, path.name),
-        assets=_asset_references(manifest.public_name, manifest.version, manifest.delta.assets),
+        recognition=LayerReference(
+            rows=manifest.delta.recognition.rows,
+            assets=_asset_references(
+                manifest.public_name,
+                manifest.version,
+                manifest.delta.recognition.assets,
+            ),
+        ),
+        metadata=LayerReference(
+            rows=manifest.delta.metadata.rows,
+            assets=_asset_references(
+                manifest.public_name,
+                manifest.version,
+                manifest.delta.metadata.assets,
+            ),
+        ),
     )
 
 
@@ -508,9 +546,10 @@ def _validate_manifest_files(path: Path, manifest: CatalogVersionManifest) -> No
         raise ValidationError(f"cannot read catalog manifest {path}") from error
     if disk_manifest != manifest:
         raise ValidationError("manifest file does not match the supplied manifest")
-    assets = [*(manifest.base or {}).values()]
+    assets = [*(manifest.base.assets if manifest.base is not None else {}).values()]
     if manifest.delta is not None:
-        assets.extend(manifest.delta.assets.values())
+        assets.extend(manifest.delta.recognition.assets.values())
+        assets.extend(manifest.delta.metadata.assets.values())
     for asset in assets:
         asset_path = path.parent / asset.path
         try:
@@ -522,7 +561,7 @@ def _validate_manifest_files(path: Path, manifest: CatalogVersionManifest) -> No
 
 
 def _validate_reference_urls(entry: CatalogFeedEntry) -> None:
-    stages: list[tuple[int, FileReference, Mapping[str, AssetReference]]] = [
+    stages: list[tuple[int, FileReference, Mapping[str, FileReference]]] = [
         (entry.base.version, entry.base.manifest, entry.base.assets),
         *(
             (update.to_version, update.manifest, update.assets)
@@ -540,29 +579,13 @@ def _validate_reference_urls(entry: CatalogFeedEntry) -> None:
 def _validate_delta_rows(delta: DeltaReference) -> None:
     recognition = delta.recognition
     metadata = delta.metadata
-    if not max(recognition.total, metadata.total) <= delta.rows <= (
-        recognition.total + metadata.total
+    if delta.rows.total == 0:
+        raise ValidationError("feed update rows must not be empty")
+    if not max(recognition.rows, metadata.rows) <= delta.rows.total <= (
+        recognition.rows + metadata.rows
     ):
-        raise ValidationError("feed delta rows must count unique affected rows")
-    if recognition.total:
-        if (
-            "identifiers" not in delta.assets
-            or delta.assets["identifiers"].rows != recognition.total
-        ):
-            raise ValidationError("feed delta identifier rows do not match recognition changes")
-    elif {"embeddings", "identifiers"}.intersection(delta.assets):
-        raise ValidationError("empty feed recognition delta cannot contain recognition assets")
-    recognition_upserts = recognition.added + recognition.updated
-    if recognition_upserts:
-        if (
-            "embeddings" not in delta.assets
-            or delta.assets["embeddings"].rows != recognition_upserts
-        ):
-            raise ValidationError("feed delta embedding rows do not match recognition upserts")
-    elif "embeddings" in delta.assets:
-        raise ValidationError("delete-only feed recognition delta cannot contain embeddings")
-    if metadata.total:
-        if "metadata" not in delta.assets or delta.assets["metadata"].rows != metadata.total:
-            raise ValidationError("feed delta metadata rows do not match metadata changes")
-    elif "metadata" in delta.assets:
-        raise ValidationError("empty feed metadata delta cannot contain metadata")
+        raise ValidationError("feed update rows must count unique affected catalog rows")
+    if recognition.rows and "identifiers" not in recognition.assets:
+        raise ValidationError("feed recognition updates require identifiers")
+    if "embeddings" in recognition.assets and "identifiers" not in recognition.assets:
+        raise ValidationError("feed delta embeddings require identifiers")

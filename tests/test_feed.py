@@ -77,16 +77,12 @@ def test_initial_base_only_feed(workspace: Path) -> None:
     assert entry.base.version == 0
     assert entry.base.rows == 1
     assert set(entry.base.assets) == {"embeddings", "identifiers", "metadata"}
-    assert entry.base.assets["identifiers"].rows == 1
+    assert set(entry.base.recognition) == {"embeddings", "identifiers"}
+    assert set(entry.base.metadata) == {"records"}
     assert entry.updates == {}
     assert "/scryfall-mtg/version/0/manifest.json" in entry.base.manifest.url
     assert set(entry.base.manifest.to_dict()) == {"url", "sha256", "size"}
-    assert set(entry.base.assets["identifiers"].to_dict()) == {
-        "url",
-        "sha256",
-        "size",
-        "rows",
-    }
+    assert set(entry.base.assets["identifiers"].to_dict()) == {"url", "sha256", "size"}
 
 
 def test_version_zero_delta_chain(workspace: Path) -> None:
@@ -103,10 +99,11 @@ def test_version_zero_delta_chain(workspace: Path) -> None:
         (0, 1),
         (1, 2),
     ]
-    assert entry.updates[1].rows == 1
-    assert entry.updates[1].recognition.updated == 1
-    assert entry.updates[1].metadata.updated == 1
-    assert entry.updates[1].assets["embeddings"].rows == 1
+    assert entry.updates[1].rows.updated == 1
+    assert entry.updates[1].recognition.rows == 1
+    assert entry.updates[1].metadata.rows == 1
+    assert set(entry.updates[1].recognition.assets) == {"embeddings", "identifiers"}
+    assert set(entry.updates[1].metadata.assets) == {"records"}
     assert list(entry.to_dict()["updates"]) == ["1", "2"]
 
 
@@ -164,7 +161,7 @@ def test_invalid_urls_and_checksums_are_rejected(workspace: Path) -> None:
 
 def test_asset_integrity_is_checked(workspace: Path) -> None:
     _, record = _publish(workspace, 0)
-    asset = next(iter(record[1].base.values()))
+    asset = next(iter(record[1].base.assets.values()))
     (record[0].parent / asset.path).write_bytes(b"corrupt")
 
     with pytest.raises(ValidationError, match="integrity"):
@@ -177,12 +174,12 @@ def test_inconsistent_row_summaries_are_rejected(workspace: Path) -> None:
     payload = _feed([record0, record1]).to_dict()
     payload["catalogs"][CATALOG_KEY]["rows"] += 1
 
-    with pytest.raises(ValidationError, match="base and deltas"):
+    with pytest.raises(ValidationError, match="base and updates"):
         CatalogFeed.from_dict(payload)
 
     payload = _feed([record0, record1]).to_dict()
-    payload["catalogs"][CATALOG_KEY]["updates"]["1"]["assets"]["embeddings"]["rows"] += 1
-    with pytest.raises(ValidationError, match="embedding rows"):
+    payload["catalogs"][CATALOG_KEY]["updates"]["1"]["recognition"]["rows"] = 0
+    with pytest.raises(ValidationError, match="rows and assets"):
         CatalogFeed.from_dict(payload)
 
 

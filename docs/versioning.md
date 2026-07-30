@@ -81,56 +81,61 @@ The manifest groups artifacts by installation route:
   "dim": 128,
   "dtype": "float16",
   "base": {
-    "embeddings": {
-      "path": "base/embeddings.f16.gz",
-      "rows": 110656,
-      "size": 25887836,
-      "sha256": "..."
-    },
-    "identifiers": {
-      "path": "base/identifiers.jsonl.gz",
-      "rows": 110656,
-      "size": 5710019,
-      "sha256": "..."
+    "rows": 110656,
+    "recognition": {
+      "assets": {
+        "embeddings": {
+          "path": "base/embeddings.f16.gz",
+          "size": 25887836,
+          "sha256": "..."
+        },
+        "identifiers": {
+          "path": "base/identifiers.jsonl.gz",
+          "size": 5710019,
+          "sha256": "..."
+        }
+      }
     },
     "metadata": {
-      "path": "base/metadata.jsonl.gz",
-      "rows": 110656,
-      "size": 5177483,
-      "sha256": "..."
+      "assets": {
+        "records": {
+          "path": "base/metadata.jsonl.gz",
+          "size": 5177483,
+          "sha256": "..."
+        }
+      }
     }
   },
   "delta": {
     "from_version": 9,
-    "rows": 62,
-    "recognition": {
+    "rows": {
       "added": 25,
       "updated": 37,
       "deleted": 0
     },
-    "metadata": {
-      "added": 25,
-      "updated": 0,
-      "deleted": 0
+    "recognition": {
+      "rows": 62,
+      "assets": {
+        "embeddings": {
+          "path": "delta-from-9/embeddings.f16.gz",
+          "size": 14665,
+          "sha256": "..."
+        },
+        "identifiers": {
+          "path": "delta-from-9/identifiers.jsonl.gz",
+          "size": 7119,
+          "sha256": "..."
+        }
+      }
     },
-    "assets": {
-      "embeddings": {
-        "path": "delta-from-9/embeddings.f16.gz",
-        "rows": 62,
-        "size": 14665,
-        "sha256": "..."
-      },
-      "identifiers": {
-        "path": "delta-from-9/identifiers.jsonl.gz",
-        "rows": 62,
-        "size": 7119,
-        "sha256": "..."
-      },
-      "metadata": {
-        "path": "delta-from-9/metadata.jsonl.gz",
-        "rows": 25,
-        "size": 1206,
-        "sha256": "..."
+    "metadata": {
+      "rows": 25,
+      "assets": {
+        "records": {
+          "path": "delta-from-9/metadata.jsonl.gz",
+          "size": 1206,
+          "sha256": "..."
+        }
       }
     }
   }
@@ -151,12 +156,12 @@ that version by either available route. `previous_version` records catalog
 history even for a hard checkpoint. A delta's `from_version` must equal
 `previous_version` and must advance exactly one version.
 
-Every asset reports both compressed byte `size` and the number of physical
-`rows` it contains. For a delta, top-level `rows` counts unique affected catalog
-rows across recognition and metadata. Additions and updates share the same
-upsert representation, while the manifest statistics distinguish `added`,
-`updated`, and `deleted`. Assets for layers with no operations are omitted
-instead of publishing empty gzip files.
+Each asset reports its compressed byte `size` and checksum. Base `rows` states
+the aligned snapshot size once. Delta `rows` classifies each affected catalog
+row globally as added, updated, or deleted, even when both layers changed.
+The recognition and metadata `rows` values report their respective operation
+counts. Assets for a layer with no operations are omitted instead of publishing
+empty gzip files.
 
 ## Feed routing
 
@@ -180,9 +185,9 @@ must install base 17.
 Immutable historical versions remain addressable, but the feed only needs to
 describe supported paths to the current version.
 
-The feed groups the checkpoint base separately from an ordered predecessor-delta
-list. The list may begin with the bridge into the checkpoint, so it is not
-defined as a chain that starts from `base.version`:
+The feed groups the checkpoint base separately from predecessor updates keyed
+by target version. The map may begin with the bridge into the checkpoint, so it
+is not necessarily a chain that starts from `base.version`:
 
 ```json
 {
@@ -190,17 +195,77 @@ defined as a chain that starts from `base.version`:
   "catalogs": {
     "milo1/scryfall/mtg": {
       "public_name": "scryfall-mtg",
-      "current_version": 12,
+      "current_version": 10,
+      "rows": 110656,
       "source_updated_at": "2026-07-28T09:09:18.622Z",
       "base": {
         "version": 10,
-        "manifest": {"url": ".../version/10/manifest.json", "size": 1900, "sha256": "..."},
-        "assets": {}
+        "rows": 110656,
+        "manifest": {
+          "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/scryfall-mtg/version/10/manifest.json",
+          "size": 1900,
+          "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+        },
+        "recognition": {
+          "assets": {
+            "embeddings": {
+              "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/scryfall-mtg/version/10/base/embeddings.f16.gz",
+              "size": 25887836,
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+            },
+            "identifiers": {
+              "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/scryfall-mtg/version/10/base/identifiers.jsonl.gz",
+              "size": 5710019,
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+            }
+          }
+        },
+        "metadata": {
+          "assets": {
+            "records": {
+              "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/scryfall-mtg/version/10/base/metadata.jsonl.gz",
+              "size": 5177483,
+              "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+            }
+          }
+        }
       },
       "updates": {
-        "10": {"from_version": 9, "to_version": 10, "manifest": {"url": ".../version/10/manifest.json", "size": 1900, "sha256": "..."}, "assets": {}},
-        "11": {"from_version": 10, "to_version": 11, "manifest": {"url": ".../version/11/manifest.json", "size": 1300, "sha256": "..."}, "assets": {}},
-        "12": {"from_version": 11, "to_version": 12, "manifest": {"url": ".../version/12/manifest.json", "size": 1300, "sha256": "..."}, "assets": {}}
+        "10": {
+          "from_version": 9,
+          "to_version": 10,
+          "rows": {"added": 25, "updated": 37, "deleted": 0},
+          "manifest": {
+            "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/scryfall-mtg/version/10/manifest.json",
+            "size": 1900,
+            "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "recognition": {
+            "rows": 62,
+            "assets": {
+              "embeddings": {
+                "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/scryfall-mtg/version/10/delta-from-9/embeddings.f16.gz",
+                "size": 14665,
+                "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+              },
+              "identifiers": {
+                "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/scryfall-mtg/version/10/delta-from-9/identifiers.jsonl.gz",
+                "size": 7119,
+                "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+              }
+            }
+          },
+          "metadata": {
+            "rows": 25,
+            "assets": {
+              "records": {
+                "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/scryfall-mtg/version/10/delta-from-9/metadata.jsonl.gz",
+                "size": 1206,
+                "sha256": "0000000000000000000000000000000000000000000000000000000000000000"
+              }
+            }
+          }
+        }
       }
     }
   }

@@ -28,31 +28,33 @@ DELTA_ASSETS = {
 }
 
 
+def _exact_fields(payload: Mapping[str, Any], expected: set[str], name: str) -> None:
+    if set(payload) != expected:
+        raise ValidationError(f"{name} fields must be exactly {sorted(expected)}")
+
+
 @dataclass(frozen=True)
 class PublishedAsset:
     path: str
-    rows: int
     size: int
     sha256: str
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "path": self.path,
-            "rows": self.rows,
             "size": self.size,
             "sha256": self.sha256,
         }
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> PublishedAsset:
+        _exact_fields(payload, {"path", "size", "sha256"}, "published asset")
         path = _relative_asset_path(payload.get("path"), "asset path")
-        rows = _non_negative_int(payload.get("rows"), f"asset {path!r} rows")
         size = payload.get("size")
         if not isinstance(size, int) or isinstance(size, bool) or size < 0:
             raise ValidationError(f"asset {path!r} size must be a non-negative integer")
         return cls(
             path=path,
-            rows=rows,
             size=size,
             sha256=_require_non_empty_string(payload.get("sha256"), f"asset {path!r} sha256"),
         )
@@ -77,6 +79,7 @@ class ChangeCounts:
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any], name: str) -> ChangeCounts:
+        _exact_fields(payload, {"added", "updated", "deleted"}, name)
         return cls(
             added=_non_negative_int(payload.get("added"), f"{name}.added"),
             updated=_non_negative_int(payload.get("updated"), f"{name}.updated"),
@@ -85,73 +88,138 @@ class ChangeCounts:
 
 
 @dataclass(frozen=True)
-class DeltaRoute:
-    from_version: int
+class LayerRoute:
     rows: int
-    recognition: ChangeCounts
-    metadata: ChangeCounts
     assets: dict[str, PublishedAsset]
 
     def to_dict(self) -> dict[str, Any]:
         return {
-            "from_version": self.from_version,
             "rows": self.rows,
-            "recognition": self.recognition.to_dict(),
-            "metadata": self.metadata.to_dict(),
             "assets": _assets_to_dict(self.assets),
         }
 
     @classmethod
+    def from_dict(
+        cls,
+        payload: Mapping[str, Any],
+        *,
+        name: str,
+        allowed_assets: set[str],
+    ) -> LayerRoute:
+        _exact_fields(payload, {"rows", "assets"}, name)
+        rows = _non_negative_int(payload.get("rows"), f"{name}.rows")
+        assets = _assets_from_dict(payload.get("assets"), f"{name}.assets")
+        if not set(assets).issubset(allowed_assets):
+            raise ValidationError(f"{name} contains unsupported assets")
+        if bool(rows) != bool(assets):
+            raise ValidationError(f"{name} rows and assets must both be empty or non-empty")
+        return cls(rows=rows, assets=assets)
+
+
+@dataclass(frozen=True)
+class BaseRoute:
+    rows: int
+    recognition: dict[str, PublishedAsset]
+    metadata: dict[str, PublishedAsset]
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "rows": self.rows,
+            "recognition": {"assets": _assets_to_dict(self.recognition)},
+            "metadata": {"assets": _assets_to_dict(self.metadata)},
+        }
+
+    @classmethod
+    def from_dict(cls, payload: Mapping[str, Any]) -> BaseRoute:
+        _exact_fields(payload, {"rows", "recognition", "metadata"}, "base")
+        recognition_payload = _require_mapping(
+            payload.get("recognition"), "base.recognition"
+        )
+        metadata_payload = _require_mapping(payload.get("metadata"), "base.metadata")
+        _exact_fields(recognition_payload, {"assets"}, "base.recognition")
+        _exact_fields(metadata_payload, {"assets"}, "base.metadata")
+        recognition = _assets_from_dict(
+            recognition_payload.get("assets"),
+            "base.recognition.assets",
+        )
+        metadata = _assets_from_dict(
+            metadata_payload.get("assets"),
+            "base.metadata.assets",
+        )
+        if set(recognition) != {"embeddings", "identifiers"}:
+            raise ValidationError("base recognition assets must be embeddings and identifiers")
+        if set(metadata) != {"records"}:
+            raise ValidationError("base metadata asset must be records")
+        route = cls(
+            rows=_positive_int(payload.get("rows"), "base.rows"),
+            recognition=recognition,
+            metadata=metadata,
+        )
+        _validate_route_asset_paths(route.assets, PurePosixPath("base"), "base")
+        return route
+
+    @property
+    def assets(self) -> dict[str, PublishedAsset]:
+        return {
+            **self.recognition,
+            "metadata": self.metadata["records"],
+        }
+
+
+@dataclass(frozen=True)
+class DeltaRoute:
+    from_version: int
+    rows: ChangeCounts
+    recognition: LayerRoute
+    metadata: LayerRoute
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "from_version": self.from_version,
+            "rows": self.rows.to_dict(),
+            "recognition": self.recognition.to_dict(),
+            "metadata": self.metadata.to_dict(),
+        }
+
+    @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> DeltaRoute:
+        _exact_fields(
+            payload,
+            {"from_version", "rows", "recognition", "metadata"},
+            "delta",
+        )
         from_version = _non_negative_int(payload.get("from_version"), "delta.from_version")
-        rows = _positive_int(payload.get("rows"), "delta.rows")
-        recognition = ChangeCounts.from_dict(
+        rows = ChangeCounts.from_dict(
+            _require_mapping(payload.get("rows"), "delta.rows"), "delta.rows"
+        )
+        if rows.total == 0:
+            raise ValidationError("delta rows must not be empty")
+        recognition = LayerRoute.from_dict(
             _require_mapping(payload.get("recognition"), "delta.recognition"),
-            "delta.recognition",
+            name="delta.recognition",
+            allowed_assets={"embeddings", "identifiers"},
         )
-        metadata = ChangeCounts.from_dict(
+        metadata = LayerRoute.from_dict(
             _require_mapping(payload.get("metadata"), "delta.metadata"),
-            "delta.metadata",
+            name="delta.metadata",
+            allowed_assets={"records"},
         )
-        assets = _assets_from_dict(payload.get("assets"), "delta.assets")
-        if recognition.total and "identifiers" not in assets:
-            raise ValidationError("recognition delta operations require identifiers")
-        if "embeddings" in assets and "identifiers" not in assets:
+        if recognition.rows and "identifiers" not in recognition.assets:
+            raise ValidationError("recognition updates require identifiers")
+        if "embeddings" in recognition.assets and "identifiers" not in recognition.assets:
             raise ValidationError("delta embeddings require identifiers")
-        if not recognition.total and {"embeddings", "identifiers"}.intersection(assets):
-            raise ValidationError("empty recognition delta cannot contain recognition assets")
-        if metadata.total and "metadata" not in assets:
-            raise ValidationError("metadata delta operations require metadata")
-        if not metadata.total and "metadata" in assets:
-            raise ValidationError("empty metadata delta cannot contain metadata")
-        if not max(recognition.total, metadata.total) <= rows <= (
-            recognition.total + metadata.total
-        ):
-            raise ValidationError("delta.rows must count unique affected rows")
-        if recognition.total and assets["identifiers"].rows != recognition.total:
-            raise ValidationError("identifier delta rows do not match recognition changes")
-        recognition_upserts = recognition.added + recognition.updated
-        if recognition_upserts:
-            if "embeddings" not in assets or assets["embeddings"].rows != recognition_upserts:
-                raise ValidationError("embedding delta rows do not match recognition upserts")
-        elif "embeddings" in assets:
-            raise ValidationError("delete-only recognition delta cannot contain embeddings")
-        if metadata.total and assets["metadata"].rows != metadata.total:
-            raise ValidationError("metadata delta rows do not match metadata changes")
         expected_parent = PurePosixPath(f"delta-from-{from_version}")
-        for name, asset in assets.items():
-            if name not in BASE_ASSETS:
-                raise ValidationError(f"unsupported delta asset {name!r}")
-            if PurePosixPath(asset.path).parent != expected_parent:
-                raise ValidationError(
-                    f"delta asset {name!r} must be under delta-from-{from_version}/"
-                )
+        _validate_route_asset_paths(recognition.assets, expected_parent, "recognition delta")
+        _validate_route_asset_paths(metadata.assets, expected_parent, "metadata delta")
+        if not max(recognition.rows, metadata.rows) <= rows.total <= (
+            recognition.rows + metadata.rows
+        ):
+            raise ValidationError("delta rows must count unique affected catalog rows")
         return cls(
             from_version=from_version,
             rows=rows,
             recognition=recognition,
             metadata=metadata,
-            assets=assets,
         )
 
 
@@ -167,7 +235,7 @@ class CatalogVersionManifest:
     rows: int
     dim: int
     dtype: str
-    base: dict[str, PublishedAsset] | None
+    base: BaseRoute | None
     delta: DeltaRoute | None
 
     def to_dict(self) -> dict[str, Any]:
@@ -182,12 +250,30 @@ class CatalogVersionManifest:
             "rows": self.rows,
             "dim": self.dim,
             "dtype": self.dtype,
-            "base": None if self.base is None else _assets_to_dict(self.base),
+            "base": None if self.base is None else self.base.to_dict(),
             "delta": None if self.delta is None else self.delta.to_dict(),
         }
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> CatalogVersionManifest:
+        _exact_fields(
+            payload,
+            {
+                "catalog_key",
+                "public_name",
+                "version",
+                "previous_version",
+                "embedding_model",
+                "source_revision",
+                "descriptor",
+                "rows",
+                "dim",
+                "dtype",
+                "base",
+                "delta",
+            },
+            "catalog version manifest",
+        )
         version = _non_negative_int(payload.get("version"), "version")
         previous_version_payload = payload.get("previous_version")
         previous_version = (
@@ -200,7 +286,7 @@ class CatalogVersionManifest:
         base = (
             None
             if base_payload is None
-            else _assets_from_dict(base_payload, "base")
+            else BaseRoute.from_dict(_require_mapping(base_payload, "base"))
         )
         delta = (
             None
@@ -208,9 +294,9 @@ class CatalogVersionManifest:
             else DeltaRoute.from_dict(_require_mapping(delta_payload, "delta"))
         )
         _validate_routes(version, previous_version, base, delta)
-        if base is not None:
-            _validate_base_assets(base)
         rows = _positive_int(payload.get("rows"), "rows")
+        if base is not None and base.rows != rows:
+            raise ValidationError("base.rows must match manifest rows")
         dim = _positive_int(payload.get("dim"), "dim")
         if payload.get("dtype") != "float16":
             raise ValidationError("dtype must be 'float16'")
@@ -277,14 +363,21 @@ def publish_catalog_version(
                 source_root,
                 staging_dir,
                 "base",
-                {
-                    "embeddings": build.manifest.rows,
-                    "identifiers": build.manifest.rows,
-                    "metadata": build.manifest.rows,
-                },
             )
             if plan.publish_base
             else None
+        )
+        base_route = (
+            None
+            if base_assets is None
+            else BaseRoute(
+                rows=build.manifest.rows,
+                recognition={
+                    "embeddings": base_assets["embeddings"],
+                    "identifiers": base_assets["identifiers"],
+                },
+                metadata={"records": base_assets["metadata"]},
+            )
         )
         delta_assets = (
             _publish_assets(
@@ -293,12 +386,6 @@ def publish_catalog_version(
                 source_root,
                 staging_dir,
                 f"delta-from-{plan.previous_version}",
-                {
-                    "embeddings_delta": changes.recognition.added
-                    + changes.recognition.updated,
-                    "identifiers_delta": changes.recognition.total,
-                    "metadata_delta": changes.metadata.total,
-                },
             )
             if plan.publish_delta
             else None
@@ -314,16 +401,29 @@ def publish_catalog_version(
             rows=build.manifest.rows,
             dim=build.manifest.dim,
             dtype=build.manifest.dtype,
-            base=base_assets,
+            base=base_route,
             delta=(
                 None
                 if delta_assets is None
                 else DeltaRoute(
                     from_version=plan.previous_version,
                     rows=changes.rows,
-                    recognition=changes.recognition,
-                    metadata=changes.metadata,
-                    assets=delta_assets,
+                    recognition=LayerRoute(
+                        rows=changes.recognition.total,
+                        assets={
+                            name: asset
+                            for name, asset in delta_assets.items()
+                            if name in {"embeddings", "identifiers"}
+                        },
+                    ),
+                    metadata=LayerRoute(
+                        rows=changes.metadata.total,
+                        assets=(
+                            {"records": delta_assets["metadata"]}
+                            if "metadata" in delta_assets
+                            else {}
+                        ),
+                    ),
                 )
             ),
         )
@@ -351,7 +451,6 @@ def _publish_assets(
     source_root: Path,
     version_dir: Path,
     route: str,
-    rows_by_asset: Mapping[str, int],
 ) -> dict[str, PublishedAsset]:
     name_map = {name: name for name in names} if isinstance(names, tuple) else names
     published: dict[str, PublishedAsset] = {}
@@ -372,7 +471,6 @@ def _publish_assets(
         shutil.copyfile(source, destination)
         published[public_name] = PublishedAsset(
             path=relative_path,
-            rows=rows_by_asset[source_name],
             size=asset.size,
             sha256=asset.sha256,
         )
@@ -394,7 +492,7 @@ def _public_filename(name: str, source_filename: str) -> str:
 def _validate_routes(
     version: int,
     previous_version: int | None,
-    base: dict[str, PublishedAsset] | None,
+    base: BaseRoute | None,
     delta: DeltaRoute | None,
 ) -> None:
     if version == 0:
@@ -406,18 +504,16 @@ def _validate_routes(
         raise ValidationError("catalog version must contain a base or delta")
     if delta is not None and delta.from_version != previous_version:
         raise ValidationError("delta.from_version must match previous_version")
-
-
-def _validate_base_assets(assets: Mapping[str, PublishedAsset]) -> None:
-    if set(assets) != set(BASE_ASSETS):
-        raise ValidationError(f"base assets must be exactly {list(BASE_ASSETS)}")
-    for name, asset in assets.items():
-        if PurePosixPath(asset.path).parent != PurePosixPath("base"):
-            raise ValidationError(f"base asset {name!r} must be under base/")
-    if assets["embeddings"].rows != assets["identifiers"].rows:
-        raise ValidationError("base embeddings and identifiers must have equal rows")
-    if assets["metadata"].rows != assets["identifiers"].rows:
-        raise ValidationError("base metadata and identifiers must have equal rows")
+def _validate_route_asset_paths(
+    assets: Mapping[str, PublishedAsset],
+    expected_parent: PurePosixPath,
+    name: str,
+) -> None:
+    for asset_name, asset in assets.items():
+        if PurePosixPath(asset.path).parent != expected_parent:
+            raise ValidationError(
+                f"{name} asset {asset_name!r} must be under {expected_parent}/"
+            )
 
 
 def _assets_to_dict(assets: Mapping[str, PublishedAsset]) -> dict[str, Any]:
@@ -462,7 +558,7 @@ def _builder_version(value: str, name: str) -> int:
 
 @dataclass(frozen=True)
 class _ChangeSummary:
-    rows: int
+    rows: ChangeCounts
     recognition: ChangeCounts
     metadata: ChangeCounts
 
@@ -513,8 +609,15 @@ def _change_summary(build: CatalogBuild, previous_build: CatalogBuild | None) ->
     )
     if not affected:
         raise ValidationError("cannot publish an empty delta")
+    added = current_keys - previous_keys
+    deleted = previous_keys - current_keys
+    updated = affected - added - deleted
     summary = _ChangeSummary(
-        rows=len(affected),
+        rows=ChangeCounts(
+            added=len(added),
+            updated=len(updated),
+            deleted=len(deleted),
+        ),
         recognition=ChangeCounts(
             added=len(recognition_added),
             updated=len(recognition_updated),

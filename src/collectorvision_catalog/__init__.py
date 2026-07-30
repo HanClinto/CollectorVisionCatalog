@@ -22,11 +22,11 @@ from .artifacts import (
 )
 from .feed import (
     FEED_FILENAME,
-    AssetReference,
     CatalogFeed,
     CatalogFeedEntry,
     DeltaReference,
     FileReference,
+    LayerReference,
     SnapshotReference,
     load_catalog_feed,
     update_catalog_feed,
@@ -49,7 +49,6 @@ from .versioning import (
 
 __all__ = [
     "AssetIntegrityError",
-    "AssetReference",
     "CatalogBuild",
     "CatalogDescriptor",
     "CatalogError",
@@ -63,6 +62,7 @@ __all__ = [
     "DeltaReference",
     "FEED_FILENAME",
     "FileReference",
+    "LayerReference",
     "SnapshotReference",
     "RecognitionRow",
     "SourceRevision",
