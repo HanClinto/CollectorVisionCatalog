@@ -35,6 +35,8 @@ def normalize_scryfall_card(card: Mapping[str, Any]) -> list[RecognitionRow]:
         )
         if (value := card.get(field)) is not None
     }
+    base_metadata["layout"] = _require_string(card.get("layout"), "layout")
+    base_metadata["promo"] = _require_bool(card.get("promo"), "promo")
     finishes = _finishes(card.get("finishes"))
     rows: list[RecognitionRow] = []
     card_faces = card.get("card_faces") or []
@@ -130,6 +132,12 @@ def _require_string(value: Any, name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValidationError(f"scryfall {name} must be a non-empty string")
     return value.strip()
+
+
+def _require_bool(value: Any, name: str) -> bool:
+    if not isinstance(value, bool):
+        raise ValidationError(f"scryfall {name} must be a boolean")
+    return value
 
 
 def _require_uuid(value: Any, name: str) -> str:

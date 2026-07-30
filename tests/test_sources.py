@@ -44,6 +44,8 @@ def test_normalize_scryfall_card_faces_and_identifiers() -> None:
         "finishes": ["nonfoil", "foil"],
         "cmc": 4.0,
         "colors": ["W", "U"],
+        "layout": "transform",
+        "promo": True,
         "card_faces": [
             {
                 "name": "Front Face",
@@ -85,12 +87,16 @@ def test_normalize_scryfall_card_faces_and_identifiers() -> None:
     assert "finishes" not in rows[0].metadata
     assert rows[0].metadata["cmc"] == 2
     assert rows[0].metadata["colors"] == ["W"]
+    assert rows[0].metadata["layout"] == "transform"
+    assert rows[0].metadata["promo"] is True
     assert rows[1].metadata == {
         "cmc": 4,
         "collector_number": "15",
         "colors": ["W", "U"],
         "lang": "en",
+        "layout": "transform",
         "name": "Back Face",
+        "promo": True,
         "rarity": "rare",
         "set": "neo",
         "set_name": "Neo Genesis",
@@ -103,6 +109,8 @@ def test_scryfall_floors_fractional_joke_card_cmc() -> None:
             "id": CARD_ID,
             "name": "Little Joke Card",
             "cmc": 0.5,
+            "layout": "normal",
+            "promo": False,
             "image_uris": {"png": "https://img/card.png"},
         }
     )[0]
@@ -115,6 +123,8 @@ def test_scryfall_image_revision_changes_fingerprint() -> None:
     card = {
         "id": CARD_ID,
         "name": "Sample Card",
+        "layout": "normal",
+        "promo": False,
         "image_uris": {"png": "https://cards.scryfall.io/png/front/a/b/card.png?100"},
     }
     first = normalize_scryfall_card(card)[0]
@@ -138,6 +148,8 @@ def test_scryfall_rejects_invalid_finishes(finishes: object) -> None:
                 "id": CARD_ID,
                 "name": "Sample Card",
                 "finishes": finishes,
+                "layout": "normal",
+                "promo": False,
                 "image_uris": {"png": "https://img/card.png"},
             }
         )

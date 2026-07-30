@@ -251,11 +251,15 @@ references are tracked in
 The MTG adapter uses Scryfall bulk data. Each available face is a separate
 recognition row. The Scryfall card UUID is the primary `id`; Oracle IDs and
 available TCGplayer IDs are peer identifiers. Metadata stores `cmc` as an
-integer, flooring fractional values used by joke cards.
+integer, flooring fractional values used by joke cards. The `promo` boolean and
+canonical Scryfall `layout` support filtering promos, `art_series` cards,
+tokens, emblems, and other nonstandard objects.
 
 The selected bulk-data entry supplies the source type, bulk identity,
 `jsonl_download_uri`, and update timestamp. The bulk JSONL is streamed as a
-build input and is not included in releases.
+build input and is not included in releases. The default catalog is explicitly
+paper-only; online-only cards are excluded before normalization, so a redundant
+per-row paper flag is not published.
 
 Image fingerprints include Scryfall's image revision timestamp. A revised
 source image therefore invalidates its embedding. Metadata-only changes do not
