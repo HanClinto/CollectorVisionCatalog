@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import json
 import shutil
 from collections.abc import Mapping
@@ -463,14 +464,44 @@ def _publish_assets(
         payload = source.read_bytes()
         if len(payload) != asset.size or sha256(payload).hexdigest() != asset.sha256:
             raise ValidationError(f"builder asset {source_name!r} failed integrity validation")
+        public_payload = _public_asset_payload(source_name, payload)
         destination.parent.mkdir(parents=True, exist_ok=True)
-        shutil.copyfile(source, destination)
+        destination.write_bytes(public_payload)
         published[public_name] = PublishedAsset(
             path=relative_path,
-            size=asset.size,
-            sha256=asset.sha256,
+            size=len(public_payload),
+            sha256=sha256(public_payload).hexdigest(),
         )
     return published
+
+
+def _public_asset_payload(source_name: str, payload: bytes) -> bytes:
+    if source_name != "identifiers_delta":
+        return payload
+    try:
+        records = [
+            _require_mapping(json.loads(line), "identifier delta operation")
+            for line in gzip.decompress(payload).splitlines()
+        ]
+    except (gzip.BadGzipFile, json.JSONDecodeError, UnicodeDecodeError) as error:
+        raise ValidationError("builder identifier delta is not valid gzip JSONL") from error
+    public_records = []
+    for record in records:
+        operation = dict(record)
+        operation.pop("state", None)
+        public_records.append(operation)
+    jsonl = b"".join(
+        json.dumps(
+            record,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+        + b"\n"
+        for record in public_records
+    )
+    return gzip.compress(jsonl, compresslevel=9, mtime=0)
 
 
 def _public_filename(name: str, source_filename: str) -> str:

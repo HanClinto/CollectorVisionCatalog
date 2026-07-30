@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import gzip
+import json
 from pathlib import Path
 
 import pytest
@@ -145,6 +147,10 @@ def test_incremental_version_publishes_only_delta(workspace: Path) -> None:
     assert set(manifest.delta.metadata.assets) == {"records"}
     assert not (path / "base").exists()
     assert (path / "delta-from-0/embeddings.f16.gz").is_file()
+    with gzip.open(path / "delta-from-0/identifiers.jsonl.gz", "rt") as stream:
+        operations = [json.loads(line) for line in stream]
+    assert operations
+    assert all("state" not in operation for operation in operations)
 
 
 def test_routine_and_hard_checkpoints_have_distinct_routes(workspace: Path) -> None:

@@ -168,8 +168,10 @@ rules and feed shapes.
 
 Delta operations cannot rely on row alignment, so they target a row with `id`
 and an optional nonzero `face_index`. Recognition upserts carry changed
-identifiers and embeddings; metadata upserts carry changed metadata. Deletes
-use the same compact target. The provider remains catalog-level descriptor data.
+identifiers and embeddings; metadata upserts carry changed metadata. Builder
+state such as image URLs and fingerprints is never published in either layer.
+Deletes use the same compact target. The provider remains catalog-level
+descriptor data.
 Recognition and metadata operations are independent and idempotent, so a
 removed row may have a delete in both layers.
 
