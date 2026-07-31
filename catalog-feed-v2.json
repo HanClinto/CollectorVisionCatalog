@@ -1,5 +1,5 @@
 {
-  "checked_at": "2026-07-31T02:53:01Z",
+  "checked_at": "2026-07-31T04:40:56Z",
   "families": {
     "milo1": {
       "embedding": {
@@ -159,7 +159,7 @@
             }
           }
         },
-        "tcgplayer/digimon-card-game": {
+        "tcgplayer/digimon": {
           "public_name": "tcgplayer-digimon",
           "descriptor": {
             "game": "digimon-card-game",
@@ -238,7 +238,7 @@
             }
           }
         },
-        "tcgplayer/flesh-and-blood": {
+        "tcgplayer/fab": {
           "public_name": "tcgplayer-fab",
           "descriptor": {
             "game": "flesh-and-blood",
@@ -474,7 +474,7 @@
             }
           }
         },
-        "tcgplayer/magic-the-gathering": {
+        "tcgplayer/mtg": {
           "public_name": "tcgplayer-mtg",
           "descriptor": {
             "game": "magic-the-gathering",
@@ -931,7 +931,7 @@
           },
           "updates": {}
         },
-        "tcgplayer/star-wars-unlimited": {
+        "tcgplayer/swu": {
           "public_name": "tcgplayer-swu",
           "descriptor": {
             "game": "star-wars-unlimited",
