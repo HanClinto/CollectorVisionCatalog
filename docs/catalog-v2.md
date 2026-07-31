@@ -73,7 +73,10 @@ A recognition record has this logical shape:
 `tcgplayer_product`—without repeating that name and value in every row. Other
 source IDs remain explicit peers in `identifiers`, such as `scryfall_oracle`,
 `tcgplayer_product`, `tcgplayer_etched_product`, `tcgplayer_category`, and
-`tcgplayer_group`.
+`tcgplayer_group`. TCGplayer rows also expose the exact source card name as
+`tcgplayer_name`. It is a practical equivalence key for scan deduplication when
+no stronger cross-printing identifier is available, but it is not an
+authoritative or immutable provider ID.
 
 The selected result namespace must be the provider's primary namespace:
 Scryfall catalogs use `scryfall_card`, and TCGplayer catalogs use

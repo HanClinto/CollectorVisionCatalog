@@ -29,7 +29,7 @@ def normalize_tcgcsv_product(
     if image_count < 0:
         raise ValidationError("tcgcsv imageCount must not be negative")
     extended_data = extract_extended_data(product)
-    identifiers: dict[str, str] = {}
+    identifiers: dict[str, str] = {"tcgplayer_name": product_name}
     if group is not None:
         group_id = _lookup(group, "groupId", "groupID", "group_id")
         if group_id is not None:

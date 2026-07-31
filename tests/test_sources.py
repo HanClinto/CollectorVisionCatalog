@@ -182,6 +182,7 @@ def test_normalize_tcgcsv_product_images_and_filtering() -> None:
     assert rows[0].identifiers == {
         "tcgplayer_category": "10",
         "tcgplayer_group": "20",
+        "tcgplayer_name": "Charizard",
     }
     assert rows[0].metadata == {
         "category": "Pokemon Singles",
