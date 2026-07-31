@@ -90,7 +90,23 @@
       "descriptor": {"game": "union-arena", "source": "tcgplayer", "profile": "printings", "description": "TCGplayer marketplace printing catalog.", "result_identifier": "tcgplayer_product", "recommended": true},
       "source": {"type": "tcgcsv", "category_id": 81},
       "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
-      "enabled": false,
+      "enabled": true,
+      "seed_required": true
+    },
+    {
+      "key": "milo1/tcgplayer/pokemon-japan",
+      "descriptor": {"game": "pokemon-japan", "source": "tcgplayer", "profile": "printings", "description": "TCGplayer marketplace printing catalog.", "result_identifier": "tcgplayer_product", "recommended": true},
+      "source": {"type": "tcgcsv", "category_id": 85},
+      "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
+      "enabled": true,
+      "seed_required": true
+    },
+    {
+      "key": "milo1/tcgplayer/gundam-card-game",
+      "descriptor": {"game": "gundam-card-game", "source": "tcgplayer", "profile": "printings", "description": "TCGplayer marketplace printing catalog.", "result_identifier": "tcgplayer_product", "recommended": true},
+      "source": {"type": "tcgcsv", "category_id": 86},
+      "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
+      "enabled": true,
       "seed_required": true
     },
     {
@@ -98,7 +114,7 @@
       "descriptor": {"game": "riftbound", "source": "tcgplayer", "profile": "printings", "description": "TCGplayer marketplace printing catalog.", "result_identifier": "tcgplayer_product", "recommended": true},
       "source": {"type": "tcgcsv", "category_id": 89},
       "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
-      "enabled": false,
+      "enabled": true,
       "seed_required": true
     }
   ]

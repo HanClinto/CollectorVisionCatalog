@@ -83,6 +83,29 @@ def test_repository_config_exposes_one_default_scryfall_catalog() -> None:
     assert scryfall[0].seed_required
 
 
+def test_repository_config_enables_target_tcgplayer_catalogs() -> None:
+    configs = updater.load_config(Path("config/catalogs.json"))
+    categories = {
+        item.key: item.source["category_id"]
+        for item in configs
+        if item.key
+        in {
+            "milo1/tcgplayer/union-arena",
+            "milo1/tcgplayer/pokemon-japan",
+            "milo1/tcgplayer/gundam-card-game",
+            "milo1/tcgplayer/riftbound",
+        }
+        and item.enabled
+    }
+
+    assert categories == {
+        "milo1/tcgplayer/union-arena": 81,
+        "milo1/tcgplayer/pokemon-japan": 85,
+        "milo1/tcgplayer/gundam-card-game": 86,
+        "milo1/tcgplayer/riftbound": 89,
+    }
+
+
 def test_scryfall_revision_is_extracted_from_selected_bulk_entry(monkeypatch) -> None:
     monkeypatch.setattr(
         updater,

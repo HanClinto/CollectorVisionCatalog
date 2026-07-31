@@ -42,6 +42,8 @@ LEGACY_CATALOG_KEYS = {
     "milo1/tcgplayer/lorcana": "tcgplayer-lorcana",
     "milo1/tcgplayer/star-wars-unlimited": "tcgplayer-swu",
 }
+
+
 @dataclass(frozen=True)
 class TCGplayerSeedPlan:
     catalog_key: str
@@ -99,10 +101,7 @@ def create_seed_plan(
     inference_rows: list[RecognitionRow] = []
     for row in rows:
         embedding = legacy_embeddings.get(row.key)
-        if (
-            embedding is not None
-            and row.face_index == 0
-        ):
+        if embedding is not None and row.face_index == 0:
             reusable[row.key] = embedding
         else:
             inference_rows.append(row)
@@ -163,13 +162,14 @@ def build_seed(
     config_path: Path,
     quality_overrides_path: Path,
     cache_root: Path,
-    legacy_dir: Path,
+    legacy_dir: Path | None,
     output_dir: Path,
     version: str,
     batch_size: int,
     max_downloads: int,
     refresh_workers: int,
     build: bool,
+    catalog_keys: Sequence[str] | None = None,
     expected_revision: SourceRevision | None = None,
 ) -> dict[str, Any]:
     configs_by_key = {
@@ -177,22 +177,27 @@ def build_seed(
         for config in load_config(config_path)
         if config.source.get("type") == "tcgcsv"
     }
-    missing_configs = sorted(set(LEGACY_CATALOG_KEYS).difference(configs_by_key))
+    selected_keys = tuple(catalog_keys or LEGACY_CATALOG_KEYS)
+    if not selected_keys:
+        raise ValidationError("at least one TCGplayer seed catalog must be selected")
+    if len(selected_keys) != len(set(selected_keys)):
+        raise ValidationError("TCGplayer seed catalog selections must be unique")
+    missing_configs = sorted(set(selected_keys).difference(configs_by_key))
     if missing_configs:
         raise ValidationError(f"missing TCGplayer seed configs: {missing_configs}")
+    legacy_keys = set(selected_keys).intersection(LEGACY_CATALOG_KEYS)
+    if legacy_keys and legacy_dir is None:
+        raise ValidationError("--legacy-dir is required when seeding legacy catalogs")
 
     plans: list[TCGplayerSeedPlan] = []
     model_ids: set[str] = set()
     quality_reports: dict[str, Any] = {}
     quality_rules = load_quality_rules(quality_overrides_path)
     snapshots = fetch_tcgcsv_snapshots(
-        {
-            catalog_key: configs_by_key[catalog_key].source
-            for catalog_key in LEGACY_CATALOG_KEYS
-        },
+        {catalog_key: configs_by_key[catalog_key].source for catalog_key in selected_keys},
         expected_revision=expected_revision,
     )
-    for catalog_key, legacy_key in LEGACY_CATALOG_KEYS.items():
+    for catalog_key in selected_keys:
         config = configs_by_key[catalog_key]
         snapshot = snapshots[catalog_key]
         rows = list(snapshot.rows)
@@ -206,11 +211,14 @@ def build_seed(
             **quality_result.report(),
             "source_revision": snapshot.revision.to_dict(),
         }
-        legacy_embeddings = load_legacy_embeddings(legacy_dir, legacy_key)
+        legacy_key = LEGACY_CATALOG_KEYS.get(catalog_key)
+        legacy_embeddings = (
+            load_legacy_embeddings(legacy_dir, legacy_key)
+            if legacy_key is not None and legacy_dir is not None
+            else {}
+        )
         image_cache = TCGplayerImageCache(cache_root, rows)
-        known_unavailable = {
-            row.key for row in rows if image_cache.is_temporarily_unavailable(row)
-        }
+        known_unavailable = {row.key for row in rows if image_cache.is_temporarily_unavailable(row)}
         if known_unavailable:
             print(
                 f"{catalog_key}: excluding {len(known_unavailable):,} recently unavailable images",
@@ -324,7 +332,17 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=Path("config/source-quality-overrides.json"),
     )
     parser.add_argument("--cache-root", type=Path, required=True)
-    parser.add_argument("--legacy-dir", type=Path, required=True)
+    parser.add_argument(
+        "--legacy-dir",
+        type=Path,
+        help="Legacy v1 catalog directory; required only for catalogs with reusable embeddings",
+    )
+    parser.add_argument(
+        "--catalog",
+        dest="catalog_keys",
+        action="append",
+        help="Catalog key to seed; repeat to select multiple (defaults to legacy catalogs)",
+    )
     parser.add_argument("--output-dir", type=Path, default=Path("tcgplayer-release"))
     parser.add_argument("--version", required=True)
     parser.add_argument("--expected-source-revisions", type=Path)
@@ -346,6 +364,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = parse_args(argv)
+    selected_keys = tuple(args.catalog_keys or LEGACY_CATALOG_KEYS)
     expected_revision = None
     if args.expected_source_revisions is not None:
         payload = json.loads(args.expected_source_revisions.read_text(encoding="utf-8"))
@@ -354,10 +373,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             raise ValidationError("expected source revisions catalogs must be an object")
         revisions = {
             SourceRevision.from_dict(raw_catalogs[key])
-            for key in LEGACY_CATALOG_KEYS
+            for key in selected_keys
             if key in raw_catalogs
         }
-        if len(revisions) != 1 or not set(LEGACY_CATALOG_KEYS).issubset(raw_catalogs):
+        if len(revisions) != 1 or not set(selected_keys).issubset(raw_catalogs):
             raise ValidationError(
                 "expected source revisions must contain one shared TCGCSV revision"
             )
@@ -373,6 +392,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_downloads=args.max_downloads,
         refresh_workers=args.refresh_workers,
         build=args.build,
+        catalog_keys=selected_keys,
         expected_revision=expected_revision,
     )
     return 0

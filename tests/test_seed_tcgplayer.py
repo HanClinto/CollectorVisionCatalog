@@ -65,3 +65,19 @@ def test_seed_plan_reuses_all_legacy_fronts() -> None:
     ]
     assert plan.summary()["downloads_required"] == 1
     assert plan.summary()["embeddings_to_compute"] == 2
+
+
+def test_cli_accepts_from_scratch_catalog_without_legacy_dir() -> None:
+    args = seed.parse_args(
+        [
+            "--cache-root",
+            "cache",
+            "--version",
+            "0",
+            "--catalog",
+            "milo1/tcgplayer/pokemon-japan",
+        ]
+    )
+
+    assert args.legacy_dir is None
+    assert args.catalog_keys == ["milo1/tcgplayer/pokemon-japan"]
