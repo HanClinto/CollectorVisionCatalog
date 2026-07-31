@@ -46,6 +46,11 @@ catalog-v2/scryfall-mtg/version/10/delta-from-9/identifiers.jsonl.gz
 catalog-v2/scryfall-mtg/version/10/delta-from-9/metadata.jsonl.gz
 ```
 
+The catalog key uses the same stable catalog slug after its source component,
+such as `scryfall/mtg`, `tcgplayer/mtg`, or `tcgplayer/swu`. Canonical game
+names remain in `descriptor.game`; for example, both MTG catalogs use
+`"game": "magic-the-gathering"`.
+
 The repeated `version/10/delta-from-9` makes the exact predecessor constraint
 clear when a URL is copied, cached, or logged without the feed.
 

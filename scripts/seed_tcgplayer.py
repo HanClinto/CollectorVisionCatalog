@@ -33,14 +33,14 @@ fetch_tcgcsv_snapshots = _UPDATER["fetch_tcgcsv_snapshots"]
 load_config = _UPDATER["load_config"]
 
 LEGACY_CATALOG_KEYS = {
-    "milo1/tcgplayer/magic-the-gathering": "tcgplayer-mtg",
+    "milo1/tcgplayer/mtg": "tcgplayer-mtg",
     "milo1/tcgplayer/yugioh": "tcgplayer-yugioh",
     "milo1/tcgplayer/pokemon": "tcgplayer-pokemon",
-    "milo1/tcgplayer/flesh-and-blood": "tcgplayer-fab",
-    "milo1/tcgplayer/digimon-card-game": "tcgplayer-digimon",
+    "milo1/tcgplayer/fab": "tcgplayer-fab",
+    "milo1/tcgplayer/digimon": "tcgplayer-digimon",
     "milo1/tcgplayer/one-piece": "tcgplayer-onepiece",
     "milo1/tcgplayer/lorcana": "tcgplayer-lorcana",
-    "milo1/tcgplayer/star-wars-unlimited": "tcgplayer-swu",
+    "milo1/tcgplayer/swu": "tcgplayer-swu",
 }
 
 

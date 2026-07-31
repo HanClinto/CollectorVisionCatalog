@@ -22,7 +22,7 @@
       "seed_required": true
     },
     {
-      "key": "milo1/tcgplayer/magic-the-gathering",
+      "key": "milo1/tcgplayer/mtg",
       "descriptor": {"game": "magic-the-gathering", "source": "tcgplayer", "profile": "printings", "description": "TCGplayer marketplace printing catalog.", "result_identifier": "tcgplayer_product", "recommended": true},
       "source": {"type": "tcgcsv", "category_id": 1},
       "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
@@ -46,7 +46,7 @@
       "seed_required": true
     },
     {
-      "key": "milo1/tcgplayer/flesh-and-blood",
+      "key": "milo1/tcgplayer/fab",
       "descriptor": {"game": "flesh-and-blood", "source": "tcgplayer", "profile": "printings", "description": "TCGplayer marketplace printing catalog.", "result_identifier": "tcgplayer_product", "recommended": true},
       "source": {"type": "tcgcsv", "category_id": 62},
       "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
@@ -54,7 +54,7 @@
       "seed_required": true
     },
     {
-      "key": "milo1/tcgplayer/digimon-card-game",
+      "key": "milo1/tcgplayer/digimon",
       "descriptor": {"game": "digimon-card-game", "source": "tcgplayer", "profile": "printings", "description": "TCGplayer marketplace printing catalog.", "result_identifier": "tcgplayer_product", "recommended": true},
       "source": {"type": "tcgcsv", "category_id": 63},
       "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
@@ -78,7 +78,7 @@
       "seed_required": true
     },
     {
-      "key": "milo1/tcgplayer/star-wars-unlimited",
+      "key": "milo1/tcgplayer/swu",
       "descriptor": {"game": "star-wars-unlimited", "source": "tcgplayer", "profile": "printings", "description": "TCGplayer marketplace printing catalog.", "result_identifier": "tcgplayer_product", "recommended": true},
       "source": {"type": "tcgcsv", "category_id": 79},
       "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",

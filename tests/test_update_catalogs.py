@@ -106,6 +106,19 @@ def test_repository_config_enables_target_tcgplayer_catalogs() -> None:
     }
 
 
+def test_repository_config_uses_public_catalog_slugs() -> None:
+    configs = updater.load_config(Path("config/catalogs.json"))
+    keys = {item.key for item in configs}
+
+    assert {
+        "milo1/scryfall/mtg",
+        "milo1/tcgplayer/mtg",
+        "milo1/tcgplayer/fab",
+        "milo1/tcgplayer/digimon",
+        "milo1/tcgplayer/swu",
+    }.issubset(keys)
+
+
 def test_scryfall_revision_is_extracted_from_selected_bulk_entry(monkeypatch) -> None:
     monkeypatch.setattr(
         updater,
