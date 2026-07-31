@@ -157,8 +157,8 @@ replace the working local catalog. A later online load can retry the update.
 ## Update schedule
 
 During the Catalog v2 beta, upstream refreshes are published manually while the
-catalog-local producer is integrated. The intended production schedule is a
-weekly check, normally on **Monday at 10:17 UTC**.
+catalog-local producer and durable private build state are integrated into
+GitHub Actions. The intended production schedule is one source check nightly.
 
 A source check does not automatically create a version. A catalog advances only
 when its effective recognition data, identifiers, or metadata have changed.
@@ -169,7 +169,7 @@ catalog already installed locally.
 
 ## Example update histories
 
-### A regular weekly update
+### A regular nightly update
 
 ```text
 Installed: Pokémon version 8

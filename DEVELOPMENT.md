@@ -9,13 +9,14 @@ The source adapters, deterministic FP16/JSONL artifact builder, exact
 predecessor deltas, historical Scryfall replay, and immutable version staging
 are implemented.
 
-The family-scoped feed, release audits, and catalog-first Pages layout are
-implemented. The remaining Catalog v2 cutover work is:
+The family-scoped feed, release audits, catalog-first Pages layout, and
+CollectorVision Python/browser consumers are implemented. The remaining
+Catalog v2 release-automation work is:
 
 1. Assign catalog-local versions in the updater and skip unchanged catalogs.
-2. Restore scheduled publication after the updater uses the active contract.
-3. Adapt the existing CollectorVision Python and browser consumers to the
-   catalog-local contract.
+2. Persist private builder state between GitHub Actions runs.
+3. Publish changed catalogs, the moving feed, and Pages from one nightly
+   GitHub Actions pipeline.
 
 The builder now emits compact primary `id` plus optional `face_index` records
 with line-aligned metadata. The published historical beta checkpoints have been
@@ -44,8 +45,8 @@ ruff check .
 
 Pages deployment is assembled by
 [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml).
-The earlier beta producer was removed so that it cannot overwrite the active
-feed while catalog-local update publication is being integrated.
+The earlier incompatible beta producer was removed so that it cannot overwrite
+the active feed while the catalog-local nightly producer is being integrated.
 
 ## Historical Scryfall replay
 

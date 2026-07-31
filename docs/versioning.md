@@ -136,6 +136,16 @@ version download the base and then apply updates after `base.version`.
 GitHub releases contain one `verification-audit.json`, not one public manifest
 per catalog version and not a separate `SHA256SUMS`.
 
+Beta release tags and titles use one deterministic convention:
+
+```text
+tag:   catalog-v2-YYYY-MM-DD
+title: CollectorVision Catalog v2 beta (YYYY-MM-DD)
+```
+
+Every Catalog v2 beta publication is marked as a GitHub prerelease. A nightly
+source check that finds no effective catalog changes does not create a release.
+
 The audit is an immutable provenance receipt containing:
 
 - release tag, publication time, repository, and generator commit;
