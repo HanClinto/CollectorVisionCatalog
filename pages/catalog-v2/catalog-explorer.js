@@ -13,6 +13,10 @@ const GAME_LABELS = {
   "one-piece": "One Piece Card Game",
   lorcana: "Disney Lorcana",
   "star-wars-unlimited": "Star Wars: Unlimited",
+  "pokemon-japan": "Pokémon Japan",
+  "union-arena": "Union Arena",
+  "gundam-card-game": "Gundam Card Game",
+  riftbound: "Riftbound",
 };
 
 const number = new Intl.NumberFormat();
@@ -59,7 +63,7 @@ async function fetchJson(url) {
 }
 
 async function readJsonlGzip(url) {
-  if (!("DecompressionStream" in window)) {
+  if (!("DecompressionStream" in globalThis)) {
     throw new Error("This browser cannot decompress catalog details.");
   }
   const response = await fetch(url);
@@ -93,6 +97,7 @@ function loadHistory(entry) {
     version: entry.base.version,
     rows: entry.base.rows,
     source_updated_at: entry.base.source_updated_at,
+    source: entry.descriptor.source,
     base: entry.base,
     update: entry.updates[String(entry.base.version)] || null,
   });
@@ -106,6 +111,7 @@ function loadHistory(entry) {
       version: update.to_version,
       rows,
       source_updated_at: update.source_updated_at,
+      source: entry.descriptor.source,
       base: null,
       update: null,
     };
@@ -247,18 +253,34 @@ function loadCurrentDescriptors(feed) {
   );
 }
 
-function applyIdentifierOperations(state, records) {
+function identityKey(value, source) {
+  const record = value.record || value;
+  const faceIndex = record.face_index || 0;
+  return faceIndex ? `${source}:${record.id}:face:${faceIndex}` : `${source}:${record.id}`;
+}
+
+function publicIdentifiers(record, source) {
+  if (!record) return {};
+  const primaryNamespace = source === "scryfall" ? "scryfall_card" : "tcgplayer_product";
+  return {
+    [primaryNamespace]: record.id,
+    ...record.identifiers,
+  };
+}
+
+function applyIdentifierOperations(state, records, source) {
   for (const operation of records) {
-    const key = operation.record?.key || operation.key;
+    const key = identityKey(operation, source);
     if (operation.op === "delete") state.delete(key);
     else state.set(key, operation.record);
   }
 }
 
-function applyMetadataOperations(state, records) {
+function applyMetadataOperations(state, records, source) {
   for (const operation of records) {
-    if (operation.op === "delete") state.delete(operation.key);
-    else state.set(operation.key, operation.metadata);
+    const key = identityKey(operation, source);
+    if (operation.op === "delete") state.delete(key);
+    else state.set(key, operation.metadata);
   }
 }
 
@@ -271,8 +293,18 @@ async function reconstructPriorState(history, targetIndex) {
     readJsonlGzip(base.base.recognition.assets.identifiers.url),
     readJsonlGzip(base.base.metadata.assets.records.url),
   ]);
-  const identifiers = new Map(identifierRows.map((record) => [record.key, record]));
-  const metadata = new Map(metadataRows.map((record) => [record.key, record.metadata]));
+  if (identifierRows.length !== metadataRows.length) {
+    throw new Error("Base recognition and metadata rows are not aligned.");
+  }
+  const identifiers = new Map(
+    identifierRows.map((record) => [identityKey(record, base.source), record]),
+  );
+  const metadata = new Map(
+    identifierRows.map((record, index) => [
+      identityKey(record, base.source),
+      metadataRows[index],
+    ]),
+  );
   for (let index = baseIndex + 1; index < targetIndex; index += 1) {
     const stage = history[index];
     const recognitionAssets = stage.update.recognition.assets;
@@ -281,14 +313,14 @@ async function reconstructPriorState(history, targetIndex) {
     if (recognitionAssets.identifiers) {
       jobs.push(
         readJsonlGzip(recognitionAssets.identifiers.url).then((records) =>
-          applyIdentifierOperations(identifiers, records),
+          applyIdentifierOperations(identifiers, records, stage.source),
         ),
       );
     }
     if (metadataAssets.records) {
       jobs.push(
         readJsonlGzip(metadataAssets.records.url).then((records) =>
-          applyMetadataOperations(metadata, records),
+          applyMetadataOperations(metadata, records, stage.source),
         ),
       );
     }
@@ -312,14 +344,14 @@ function setIdentity(metadata) {
   return metadata?.set || metadata?.set_name || "";
 }
 
-function describeRecord(key, metadata) {
+function describeRecord(key, recognition, metadata) {
   const promo =
     metadata?.promo === true ||
     metadata?.set_type === "promo" ||
     (Array.isArray(metadata?.promo_types) && metadata.promo_types.length > 0);
   return {
     key,
-    name: metadata?.name || key,
+    name: recognition?.name || key,
     promo,
     context: [
       metadata?.set_name || metadata?.set,
@@ -364,11 +396,11 @@ async function analyzeUpdate(history, index) {
   const targetMetadata = new Map(
     metadataOps
       .filter((operation) => operation.op !== "delete")
-      .map((operation) => [operation.key, operation.metadata]),
+      .map((operation) => [identityKey(operation, stage.source), operation.metadata]),
   );
   const changes = new Map();
   for (const operation of identifierOps) {
-    const key = operation.record?.key || operation.key;
+    const key = identityKey(operation, stage.source);
     const previousRecord = prior.identifiers.get(key);
     const existed = previousRecord !== undefined;
     const metadata = targetMetadata.get(key) || prior.metadata.get(key);
@@ -381,16 +413,17 @@ async function analyzeUpdate(history, index) {
       kind = "recognition updated";
     }
     changes.set(key, {
-      ...describeRecord(key, metadata),
+      ...describeRecord(key, operation.record || previousRecord, metadata),
       kinds: [kind],
       fields: [],
-      identifiers: operation.record?.identifiers || previousRecord?.identifiers || {},
+      identifiers: publicIdentifiers(operation.record || previousRecord, stage.source),
       metadata,
       metadataLabel: operation.op === "delete" ? "Previous metadata" : "Metadata",
     });
   }
   for (const operation of metadataOps) {
-    const previous = prior.metadata.get(operation.key);
+    const key = identityKey(operation, stage.source);
+    const previous = prior.metadata.get(key);
     const current = operation.op === "delete" ? undefined : operation.metadata;
     const fields = changedFields(previous, current);
     const kind = operation.op === "delete"
@@ -398,7 +431,7 @@ async function analyzeUpdate(history, index) {
       : previous
         ? "metadata corrected"
         : "metadata added";
-    const existing = changes.get(operation.key);
+    const existing = changes.get(key);
     if (existing) {
       if (!existing.kinds.includes("new card")) {
         existing.kinds.push(kind);
@@ -408,11 +441,12 @@ async function analyzeUpdate(history, index) {
       existing.metadataLabel =
         operation.op === "delete" ? "Previous metadata" : "Metadata";
     } else {
-      changes.set(operation.key, {
-        ...describeRecord(operation.key, current || previous),
+      const recognition = prior.identifiers.get(key);
+      changes.set(key, {
+        ...describeRecord(key, recognition, current || previous),
         kinds: [kind],
         fields,
-        identifiers: prior.identifiers.get(operation.key)?.identifiers || {},
+        identifiers: publicIdentifiers(recognition, stage.source),
         metadata: current || previous,
         metadataLabel: operation.op === "delete" ? "Previous metadata" : "Metadata",
       });
@@ -598,4 +632,6 @@ async function main() {
   }
 }
 
-main();
+export { analyzeUpdate, identityKey, loadHistory, reconstructPriorState };
+
+if (typeof document !== "undefined") main();
