@@ -59,6 +59,7 @@ A recognition record has this logical shape:
 ```json
 {
   "id": "00000000-0000-0000-0000-000000000000",
+  "name": "Example Card",
   "identifiers": {
     "scryfall_oracle": "11111111-1111-1111-1111-111111111111",
     "tcgplayer_product": "12345"
@@ -73,10 +74,12 @@ A recognition record has this logical shape:
 `tcgplayer_product`—without repeating that name and value in every row. Other
 source IDs remain explicit peers in `identifiers`, such as `scryfall_oracle`,
 `tcgplayer_product`, `tcgplayer_etched_product`, `tcgplayer_category`, and
-`tcgplayer_group`. TCGplayer rows also expose the exact source card name as
-`tcgplayer_name`. It is a practical equivalence key for scan deduplication when
-no stronger cross-printing identifier is available, but it is not an
-authoritative or immutable provider ID.
+`tcgplayer_group`.
+
+`name` is core recognition data rather than optional metadata. For TCGplayer it
+is also a practical equivalence key for scan deduplication when no stronger
+cross-printing identifier is available, but it is not an authoritative or
+immutable provider ID.
 
 The selected result namespace must be the provider's primary namespace:
 Scryfall catalogs use `scryfall_card`, and TCGplayer catalogs use
@@ -87,7 +90,7 @@ query with `id`; `identifiers` contains only additional namespaces.
 back face. A client that needs a globally unique map key can derive
 `<provider>:<id>` for the front face and `<provider>:<id>:face:<N>` for
 additional faces. The derived key is not stored in public rows. Genuine
-per-face names belong in optional metadata, not recognition records.
+per-face names are stored directly in their recognition records.
 
 `finishes` is an optional recognition-layer attribute because applications may
 need to filter candidate printings during identification. Values use
@@ -100,8 +103,9 @@ and convert values during dot products. Gzip remains a whole-asset download:
 assets are immutable and checksummed, and clients cache and replace a profile
 atomically. Sharding or range access should be added only after measured need.
 
-The FP16 embeddings and identifiers are the required client layer. Metadata
-is optional. Builder state is separate and clients must not download it.
+The FP16 embeddings and core recognition records are the required client
+layer. Metadata is optional. Builder state is separate and clients must not
+download it.
 
 ### Catalog coverage
 
@@ -118,7 +122,6 @@ rows. Each line is the row's metadata object, or JSON `null` when that row has
 no metadata. It does not repeat row identity. Clients that only need
 recognition never download it. Common fields include:
 
-- name;
 - set ID, code, and name;
 - collector number;
 - rarity;
@@ -153,8 +156,8 @@ repeating row identity. It contains neither source images nor a cache of source
 responses.
 
 The state and prior recognition snapshot are sufficient to reuse unchanged
-embeddings. Metadata fingerprints are intentionally independent from image
-fingerprints: a corrected card name should update metadata without causing an
+embeddings. Core-record and metadata changes are independent from image
+fingerprints: a corrected card name updates recognition without causing an
 image download or inference.
 
 ## Full snapshots and deltas
@@ -170,8 +173,8 @@ full refresh. See [Catalog v2 versioning and paths](versioning.md) for the exact
 rules and feed shapes.
 
 Delta operations cannot rely on row alignment, so they target a row with `id`
-and an optional nonzero `face_index`. Recognition upserts carry changed
-identifiers and embeddings; metadata upserts carry changed metadata. Builder
+and an optional nonzero `face_index`. Recognition upserts carry changed core
+records and embeddings; metadata upserts carry changed metadata. Builder
 state such as image URLs and fingerprints is never published in either layer.
 Deletes use the same compact target. The provider remains catalog-level
 descriptor data.
@@ -235,7 +238,7 @@ instead of silently attempting a full hosted-run rebuild.
 Source records may be valid while their images are unsuitable for recognition,
 including placeholders, text overlays, watermarks, and non-camera-true
 reference art. Versioned quality rules can approve, quarantine, or reject rows
-by source, category, group, product, face, and metadata name pattern. Rules can
+by source, category, group, product, face, and core name pattern. Rules can
 exclude reviewed exceptions from a broader match. Quarantined and rejected rows
 are removed before embedding and listed in `quality-report.json`; these
 decisions do not add fields to minimal recognition records.

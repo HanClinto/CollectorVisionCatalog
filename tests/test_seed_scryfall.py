@@ -30,6 +30,7 @@ def make_row(card_id: str, revision: int) -> RecognitionRow:
     return RecognitionRow(
         provider="scryfall",
         id=card_id,
+        name=card_id,
         identifiers={},
         image_url=f"https://cards.scryfall.io/png/front/a/b/{card_id}.png?{revision}",
         image_fingerprint=f"fp-{revision}",

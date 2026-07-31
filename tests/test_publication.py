@@ -249,7 +249,8 @@ def test_metadata_only_delta_omits_recognition_assets(workspace: Path) -> None:
                 "alpha",
                 "memory://alpha",
                 "fp-0",
-                metadata={"name": "Renamed"},
+                name="Alpha",
+                metadata={"set": "Renamed"},
             )
         ],
         embedder=TrackingEmbedder(),

@@ -227,10 +227,16 @@ def test_base_rows_are_minimal_and_line_aligned(workspace: Path) -> None:
     ) == [
         {
             "id": "card",
+            "name": "Front",
             "identifiers": {"peer": "peer-1"},
             "finishes": ["foil", "nonfoil"],
         },
-        {"id": "card", "identifiers": {"peer": "peer-1"}, "face_index": 1},
+        {
+            "id": "card",
+            "name": "card",
+            "identifiers": {"peer": "peer-1"},
+            "face_index": 1,
+        },
     ]
     assert _read_gzip_jsonl(
         workspace / "aligned" / build.manifest.assets["metadata"].filename
@@ -385,6 +391,7 @@ def test_finish_only_change_produces_recognition_delta(workspace: Path) -> None:
                 "finishes": ["foil", "nonfoil"],
                 "id": "alpha",
                 "identifiers": {},
+                "name": "Alpha",
             },
             "state": {
                 "image_fingerprint": "fp-alpha",
@@ -469,6 +476,7 @@ def test_identifiers_serialize_without_primary_identifier(workspace: Path) -> No
     row = RecognitionRow(
         provider="scryfall",
         id="card-1",
+        name="Card",
         identifiers={"scryfall_oracle": "oracle-1"},
         image_url="memory://alpha",
         image_fingerprint="fp-alpha",
@@ -493,6 +501,7 @@ def test_identifiers_serialize_without_primary_identifier(workspace: Path) -> No
     )
     assert build.rows[0].minimal_record() == {
         "id": "card-1",
+        "name": "Card",
         "identifiers": {"scryfall_oracle": "oracle-1"},
     }
     assert build.manifest.descriptor == descriptor
@@ -520,6 +529,7 @@ def test_known_provider_requires_its_primary_identifier_namespace(workspace: Pat
     row = RecognitionRow(
         provider="scryfall",
         id="card-1",
+        name="Card",
         identifiers={},
         image_url="memory://alpha",
         image_fingerprint="fp-alpha",
@@ -548,6 +558,7 @@ def test_primary_identity_components_cannot_contain_separator(workspace: Path) -
     row = RecognitionRow(
         provider="test-source",
         id="ambiguous:face:1",
+        name="Card",
         identifiers={},
         image_url="memory://alpha",
         image_fingerprint="fp-alpha",

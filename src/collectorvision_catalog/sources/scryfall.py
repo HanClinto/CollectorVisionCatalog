@@ -13,7 +13,7 @@ _IMAGE_PREFERENCE = ("png", "large", "normal")
 
 def normalize_scryfall_card(card: Mapping[str, Any]) -> list[RecognitionRow]:
     card_id = _require_uuid(card.get("id"), "id")
-    _require_string(card.get("name"), "name")
+    card_name = _require_string(card.get("name"), "name")
     identifiers: dict[str, str] = {}
     if (oracle_id := card.get("oracle_id")) not in (None, ""):
         identifiers["scryfall_oracle"] = _require_uuid(oracle_id, "oracle_id")
@@ -26,7 +26,6 @@ def normalize_scryfall_card(card: Mapping[str, Any]) -> list[RecognitionRow]:
     base_metadata = {
         field: value
         for field in (
-            "name",
             "set",
             "set_name",
             "lang",
@@ -51,6 +50,7 @@ def normalize_scryfall_card(card: Mapping[str, Any]) -> list[RecognitionRow]:
                 RecognitionRow(
                     provider="scryfall",
                     id=card_id,
+                    name=_require_string(face_payload.get("name", card_name), "face name"),
                     identifiers=dict(sorted(identifiers.items())),
                     image_url=image_url,
                     image_fingerprint=_fingerprint(image_url),
@@ -68,6 +68,7 @@ def normalize_scryfall_card(card: Mapping[str, Any]) -> list[RecognitionRow]:
         RecognitionRow(
             provider="scryfall",
             id=card_id,
+            name=card_name,
             identifiers=dict(sorted(identifiers.items())),
             image_url=image_url,
             image_fingerprint=_fingerprint(image_url),
@@ -83,8 +84,6 @@ def _metadata(
     face: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     metadata = dict(base)
-    if face is not None and (name := face.get("name")) is not None:
-        metadata["name"] = name
     for field in ("cmc", "colors"):
         value = face.get(field) if face is not None and field in face else card.get(field)
         if value is not None:

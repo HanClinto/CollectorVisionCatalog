@@ -129,6 +129,7 @@ def make_row(
     face_index: int = 0,
     finishes: tuple[str, ...] = (),
     metadata: dict[str, object] | None = None,
+    name: str | None = None,
 ) -> RecognitionRow:
     provider = "test-source"
     primary_id = primary_value or row_id
@@ -141,6 +142,7 @@ def make_row(
     return RecognitionRow(
         provider=provider,
         id=primary_id,
+        name=name or str((metadata or {}).get("name", primary_id)),
         identifiers=identifiers or {},
         image_url=image_url,
         image_fingerprint=image_fingerprint,

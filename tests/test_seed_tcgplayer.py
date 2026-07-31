@@ -20,6 +20,7 @@ def make_row(product_id: str, modified_on: str, face_index: int = 0) -> Recognit
     return RecognitionRow(
         provider="tcgplayer",
         id=product_id,
+        name=product_id,
         identifiers={},
         image_url=(
             f"https://tcgplayer-cdn.tcgplayer.com/product/{product_id}"

@@ -176,8 +176,7 @@ def _matches_fields(match: Mapping[str, object], row: RecognitionRow) -> bool:
             if any(_identifier_value(row, name) != value for name, value in expected.items()):
                 return False
         elif field == "name_regex":
-            name = (row.metadata or {}).get("name")
-            if not isinstance(name, str) or re.search(str(expected), name) is None:
+            if row.name is None or re.search(str(expected), row.name) is None:
                 return False
         elif values[field] != expected:
             return False

@@ -208,6 +208,7 @@ class RecognitionRow:
     face_index: int = 0
     metadata: dict[str, JSONValue] | None = None
     finishes: tuple[str, ...] = ()
+    name: str | None = None
 
     @property
     def key(self) -> str:
@@ -216,6 +217,7 @@ class RecognitionRow:
     def minimal_record(self) -> dict[str, Any]:
         record = {
             "id": self.id,
+            "name": _require_non_empty_string(self.name, "name"),
             "identifiers": dict(sorted(self.identifiers.items())),
         }
         if self.face_index:
@@ -241,6 +243,7 @@ class RecognitionRow:
             face_index=self.face_index,
             finishes=self.finishes,
             metadata=metadata,
+            name=self.name,
         )
 
     @classmethod
@@ -252,10 +255,10 @@ class RecognitionRow:
         provider: str,
         metadata: Mapping[str, Any] | None = None,
     ) -> RecognitionRow:
-        allowed_fields = {"id", "identifiers", "face_index", "finishes"}
+        allowed_fields = {"id", "name", "identifiers", "face_index", "finishes"}
         _require_allowed_fields(
             minimal_payload,
-            required={"id", "identifiers"},
+            required={"id", "name", "identifiers"},
             allowed=allowed_fields,
             name="recognition record",
         )
@@ -299,6 +302,7 @@ class RecognitionRow:
             face_index=face_index,
             finishes=finishes,
             metadata=normalized_metadata,
+            name=_require_non_empty_string(minimal_payload.get("name"), "name"),
         )
 
 

@@ -89,13 +89,14 @@ def test_normalize_scryfall_card_faces_and_identifiers() -> None:
     assert rows[0].metadata["colors"] == ["W"]
     assert rows[0].metadata["layout"] == "transform"
     assert rows[0].metadata["promo"] is True
+    assert rows[0].name == "Front Face"
+    assert rows[1].name == "Back Face"
     assert rows[1].metadata == {
         "cmc": 4,
         "collector_number": "15",
         "colors": ["W", "U"],
         "lang": "en",
         "layout": "transform",
-        "name": "Back Face",
         "promo": True,
         "rarity": "rare",
         "set": "neo",
@@ -182,13 +183,12 @@ def test_normalize_tcgcsv_product_images_and_filtering() -> None:
     assert rows[0].identifiers == {
         "tcgplayer_category": "10",
         "tcgplayer_group": "20",
-        "tcgplayer_name": "Charizard",
     }
+    assert rows[0].name == "Charizard"
     assert rows[0].metadata == {
         "category": "Pokemon Singles",
         "collector_number": "4/102",
         "language": "English",
-        "name": "Charizard",
         "rarity": "Rare Holo",
         "set": "Base Set",
     }

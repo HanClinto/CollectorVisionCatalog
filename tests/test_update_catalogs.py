@@ -59,6 +59,7 @@ def make_row(image_url: str = "memory://front") -> RecognitionRow:
     return RecognitionRow(
         provider="scryfall",
         id=CARD_ID,
+        name="Card",
         identifiers={"scryfall_oracle": ORACLE_ID},
         image_url=image_url,
         image_fingerprint="fingerprint-1",
