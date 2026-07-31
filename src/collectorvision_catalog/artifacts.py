@@ -18,6 +18,21 @@ from PIL import Image
 
 JSONValue = None | bool | int | float | str | list["JSONValue"] | dict[str, "JSONValue"]
 
+
+class _MetadataUnset:
+    """Sentinel marking a public delta upsert that preserves predecessor metadata."""
+
+    def __repr__(self) -> str:  # pragma: no cover - debugging aid only
+        return "METADATA_UNSET"
+
+
+METADATA_UNSET: Any = _MetadataUnset()
+
+_PUBLIC_STATE_STUB: dict[str, str] = {
+    "image_url": "public:none",
+    "image_fingerprint": "public:none",
+}
+
 _SAFE_SLUG_CHARS = re.compile(r"[^A-Za-z0-9._-]+")
 _PRIMARY_IDENTIFIERS = {
     "scryfall": "scryfall_card",
@@ -896,6 +911,274 @@ def apply_delta(
         embeddings=embeddings,
         state=state_by_key,
     )
+
+
+# --- Public combined-record transport contract ---
+#
+# The public base and delta contracts described in docs/catalog-v2.md combine
+# core recognition (`id`, `name`, `identifiers`, optional `face_index`,
+# optional `finishes`) with optional metadata into a single gzip JSONL
+# "records" asset, paired with a separate FP16 embeddings asset. Unlike the
+# private builder artifacts above (which retain separate identifiers,
+# metadata, and state assets for embedding reuse and auditability), the
+# public contract never exposes builder state such as image URLs or
+# fingerprints.
+
+
+@dataclass(frozen=True)
+class PublicUpsert:
+    """A public delta operation that adds or updates one catalog row.
+
+    ``row`` carries only the core recognition fields; its ``metadata`` is
+    always ``None`` because metadata is tracked independently by this
+    dataclass's own ``metadata`` field. ``metadata`` is ``METADATA_UNSET``
+    when the operation does not change metadata (preserve the predecessor),
+    ``None`` when metadata is explicitly removed, or a mapping when metadata
+    is set. ``embedding_index`` is ``None`` unless recognition changed.
+    """
+
+    row: RecognitionRow
+    metadata: Any = METADATA_UNSET
+    embedding_index: int | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {"op": "upsert", "record": self.row.minimal_record()}
+        if self.metadata is not METADATA_UNSET:
+            payload["metadata"] = self.metadata
+        if self.embedding_index is not None:
+            payload["embedding_index"] = self.embedding_index
+        return payload
+
+
+@dataclass(frozen=True)
+class PublicDelete:
+    """A public delta operation that removes one whole catalog row."""
+
+    id: str
+    face_index: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {"op": "delete", "id": self.id}
+        if self.face_index:
+            payload["face_index"] = self.face_index
+        return payload
+
+
+PublicOperation = PublicUpsert | PublicDelete
+
+
+@dataclass(frozen=True)
+class PublicDeltaBundle:
+    operations: tuple[PublicOperation, ...]
+    embeddings: NDArray[np.float16]
+
+
+def public_base_record(row: RecognitionRow) -> dict[str, Any]:
+    """Return one public base "records" line for ``row``."""
+    record = row.minimal_record()
+    record["metadata"] = row.metadata
+    return record
+
+
+def build_public_base_records(rows: Sequence[RecognitionRow]) -> bytes:
+    """Serialize the public base "records" asset payload (gzip JSONL)."""
+    return _gzip_bytes(_jsonl_bytes(public_base_record(row) for row in rows))
+
+
+def load_public_base_records(payload: bytes, *, provider: str) -> list[RecognitionRow]:
+    """Parse a public base "records" asset payload into recognition rows."""
+    decoded = gzip.decompress(payload) if payload else b""
+    rows: list[RecognitionRow] = []
+    seen_keys: set[str] = set()
+    for line_number, line in enumerate(decoded.decode("utf-8").splitlines(), start=1):
+        try:
+            raw = json.loads(line)
+        except json.JSONDecodeError as error:
+            raise AssetIntegrityError(f"records line {line_number} is not valid JSON") from error
+        payload_mapping = _require_mapping(raw, f"records line {line_number}")
+        if "metadata" not in payload_mapping:
+            raise ValidationError(
+                f"records line {line_number} is missing the required metadata key"
+            )
+        metadata = payload_mapping["metadata"]
+        if metadata is not None and not isinstance(metadata, Mapping):
+            raise ValidationError(
+                f"records line {line_number} metadata must be an object or null"
+            )
+        minimal_payload = {
+            key: value for key, value in payload_mapping.items() if key != "metadata"
+        }
+        row = RecognitionRow.from_artifact_records(
+            minimal_payload,
+            _PUBLIC_STATE_STUB,
+            provider=provider,
+            metadata=metadata,
+        )
+        if row.key in seen_keys:
+            raise ValidationError(f"duplicate public record for key {row.key!r}")
+        seen_keys.add(row.key)
+        rows.append(row)
+    return rows
+
+
+def build_public_delta_records(operations: Sequence[PublicOperation]) -> bytes:
+    """Serialize the public delta "records" operation asset payload (gzip JSONL)."""
+    return _gzip_bytes(_jsonl_bytes(operation.to_dict() for operation in operations))
+
+
+def load_public_delta_records(payload: bytes, *, provider: str) -> list[PublicOperation]:
+    """Parse a public delta "records" operation asset payload."""
+    decoded = gzip.decompress(payload) if payload else b""
+    operations: list[PublicOperation] = []
+    seen_keys: set[str] = set()
+    for line_number, line in enumerate(decoded.decode("utf-8").splitlines(), start=1):
+        try:
+            raw = json.loads(line)
+        except json.JSONDecodeError as error:
+            raise AssetIntegrityError(
+                f"delta records line {line_number} is not valid JSON"
+            ) from error
+        entry = _require_mapping(raw, f"delta records line {line_number}")
+        op_type = _require_non_empty_string(entry.get("op"), f"delta records line {line_number} op")
+        if op_type == "delete":
+            _require_allowed_fields(
+                entry,
+                required={"op", "id"},
+                allowed={"op", "id", "face_index"},
+                name="public delta delete",
+            )
+            primary_id, face_index = _parse_identity_target(entry, "public delta delete")
+            key = catalog_row_key(provider, primary_id, face_index)
+            if key in seen_keys:
+                raise ValidationError(f"duplicate public delta operation for key {key!r}")
+            seen_keys.add(key)
+            operations.append(PublicDelete(id=primary_id, face_index=face_index))
+            continue
+        if op_type != "upsert":
+            raise ValidationError(f"unsupported public delta op {op_type!r}")
+        _require_allowed_fields(
+            entry,
+            required={"op", "record"},
+            allowed={"op", "record", "metadata", "embedding_index"},
+            name="public delta upsert",
+        )
+        record_payload = _require_mapping(entry.get("record"), "public delta upsert record")
+        row = RecognitionRow.from_artifact_records(
+            record_payload, _PUBLIC_STATE_STUB, provider=provider
+        )
+        if row.key in seen_keys:
+            raise ValidationError(f"duplicate public delta operation for key {row.key!r}")
+        seen_keys.add(row.key)
+        metadata = entry["metadata"] if "metadata" in entry else METADATA_UNSET
+        if (
+            metadata is not METADATA_UNSET
+            and metadata is not None
+            and not isinstance(metadata, Mapping)
+        ):
+            raise ValidationError("public delta upsert metadata must be an object or null")
+        embedding_index = entry.get("embedding_index")
+        if embedding_index is not None and (
+            not isinstance(embedding_index, int)
+            or isinstance(embedding_index, bool)
+            or embedding_index < 0
+        ):
+            raise ValidationError(
+                "public delta upsert embedding_index must be a non-negative integer"
+            )
+        operations.append(PublicUpsert(row=row, metadata=metadata, embedding_index=embedding_index))
+    return operations
+
+
+def build_public_embeddings(embeddings: NDArray[np.float16]) -> bytes:
+    """Serialize a public FP16 embeddings asset payload (gzip raw little-endian)."""
+    return _gzip_bytes(_embedding_bytes(embeddings))
+
+
+def load_public_embeddings(payload: bytes, *, rows: int, dim: int) -> NDArray[np.float16]:
+    """Parse a public FP16 embeddings asset payload."""
+    decoded = gzip.decompress(payload) if payload else b""
+    embeddings = np.frombuffer(decoded, dtype="<f2")
+    expected_values = rows * dim
+    if embeddings.size != expected_values:
+        raise AssetIntegrityError(
+            f"embeddings contains {embeddings.size} values but expected {expected_values}"
+        )
+    return embeddings.reshape((rows, dim)).astype(np.float16, copy=False)
+
+
+def apply_public_delta(
+    previous_rows: Sequence[RecognitionRow],
+    previous_embeddings: NDArray[np.float16],
+    delta: PublicDeltaBundle,
+    *,
+    provider: str,
+) -> tuple[list[RecognitionRow], NDArray[np.float16]]:
+    """Reconstruct the current rows and embeddings from an exact predecessor and a delta.
+
+    Validates that any upsert without an ``embedding_index`` leaves the core
+    recognition record exactly equal to its predecessor, rejecting delta
+    bundles that change recognition without publishing a new embedding.
+    """
+    dim = previous_embeddings.shape[1] if previous_embeddings.ndim == 2 else 0
+    current_rows: dict[str, RecognitionRow] = {row.key: row for row in previous_rows}
+    current_embeddings: dict[str, NDArray[np.float16]] = {
+        row.key: previous_embeddings[index].copy() for index, row in enumerate(previous_rows)
+    }
+    used_embedding_indexes: set[int] = set()
+    for operation in delta.operations:
+        if isinstance(operation, PublicDelete):
+            key = catalog_row_key(provider, operation.id, operation.face_index)
+            if key not in current_rows:
+                raise ValidationError(f"public delta delete references missing key {key!r}")
+            current_rows.pop(key)
+            current_embeddings.pop(key)
+            continue
+        key = operation.row.key
+        predecessor = current_rows.get(key)
+        if operation.embedding_index is None:
+            if predecessor is None:
+                raise ValidationError(
+                    f"public delta upsert for new key {key!r} requires embedding_index"
+                )
+            if predecessor.minimal_record() != operation.row.minimal_record():
+                raise ValidationError(
+                    f"public delta upsert for key {key!r} changed recognition "
+                    "without embedding_index"
+                )
+            metadata = (
+                predecessor.metadata
+                if operation.metadata is METADATA_UNSET
+                else operation.metadata
+            )
+            current_rows[key] = operation.row.with_metadata(metadata)
+        else:
+            if operation.embedding_index in used_embedding_indexes:
+                raise ValidationError(
+                    f"duplicate public delta embedding index {operation.embedding_index}"
+                )
+            used_embedding_indexes.add(operation.embedding_index)
+            if operation.embedding_index >= len(delta.embeddings):
+                raise ValidationError(
+                    f"public delta upsert for key {key!r} references missing embedding index "
+                    f"{operation.embedding_index}"
+                )
+            if operation.metadata is METADATA_UNSET:
+                metadata = predecessor.metadata if predecessor is not None else None
+            else:
+                metadata = operation.metadata
+            current_rows[key] = operation.row.with_metadata(metadata)
+            current_embeddings[key] = delta.embeddings[operation.embedding_index].copy()
+    if used_embedding_indexes != set(range(len(delta.embeddings))):
+        raise ValidationError("public delta embedding indexes must be contiguous and complete")
+    sorted_keys = sorted(current_rows)
+    rows = [current_rows[key] for key in sorted_keys]
+    if rows:
+        embeddings = np.vstack([current_embeddings[key] for key in sorted_keys]).astype(
+            np.float16, copy=False
+        )
+    else:
+        embeddings = np.empty((0, dim), dtype=np.float16)
+    return rows, embeddings
 
 
 def default_image_loader(image_url: str) -> Image.Image:

@@ -84,11 +84,9 @@ def test_initial_base_only_feed(workspace: Path) -> None:
     assert entry.rows == 1
     assert entry.base.version == 0
     assert entry.base.rows == 1
-    assert set(entry.base.assets) == {"embeddings", "identifiers", "metadata"}
-    assert set(entry.base.recognition) == {"embeddings", "identifiers"}
-    assert set(entry.base.metadata) == {"records"}
+    assert set(entry.base.assets) == {"records", "embeddings"}
     assert entry.updates == {}
-    assert set(entry.base.assets["identifiers"].to_dict()) == {"url", "sha256", "size"}
+    assert set(entry.base.assets["records"].to_dict()) == {"url", "sha256", "size"}
 
 
 def test_version_zero_delta_chain(workspace: Path) -> None:
@@ -106,10 +104,9 @@ def test_version_zero_delta_chain(workspace: Path) -> None:
         (1, 2),
     ]
     assert entry.updates[1].rows.updated == 1
-    assert entry.updates[1].recognition.rows == 1
-    assert entry.updates[1].metadata.rows == 1
-    assert set(entry.updates[1].recognition.assets) == {"embeddings", "identifiers"}
-    assert set(entry.updates[1].metadata.assets) == {"records"}
+    assert entry.updates[1].recognition_rows == 1
+    assert entry.updates[1].metadata_rows == 1
+    assert set(entry.updates[1].assets) == {"records", "embeddings"}
     assert list(entry.to_dict()["updates"]) == ["1", "2"]
 
 
@@ -155,14 +152,14 @@ def test_invalid_urls_and_checksums_are_rejected(workspace: Path) -> None:
     _, record = _publish(workspace, 0)
     payload = _feed([record]).to_dict()
     base = payload["families"][FAMILY]["catalogs"][LOCAL_KEY]["base"]
-    base["recognition"]["assets"]["identifiers"]["url"] = "http://example.com/rows"
+    base["assets"]["records"]["url"] = "http://example.com/rows"
     with pytest.raises(ValidationError, match="must be under"):
         CatalogFeed.from_dict(payload)
 
     payload = _feed([record]).to_dict()
-    payload["families"][FAMILY]["catalogs"][LOCAL_KEY]["base"]["recognition"]["assets"][
-        "identifiers"
-    ]["sha256"] = "not-a-checksum"
+    payload["families"][FAMILY]["catalogs"][LOCAL_KEY]["base"]["assets"]["records"][
+        "sha256"
+    ] = "not-a-checksum"
     with pytest.raises(ValidationError, match="lowercase hexadecimal"):
         CatalogFeed.from_dict(payload)
 
@@ -186,10 +183,10 @@ def test_inconsistent_row_summaries_are_rejected(workspace: Path) -> None:
         CatalogFeed.from_dict(payload)
 
     payload = _feed([record0, record1]).to_dict()
-    payload["families"][FAMILY]["catalogs"][LOCAL_KEY]["updates"]["1"]["recognition"][
-        "rows"
+    payload["families"][FAMILY]["catalogs"][LOCAL_KEY]["updates"]["1"][
+        "recognition_rows"
     ] = 0
-    with pytest.raises(ValidationError, match="rows and assets"):
+    with pytest.raises(ValidationError, match="require recognition"):
         CatalogFeed.from_dict(payload)
 
 

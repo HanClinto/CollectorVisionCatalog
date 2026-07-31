@@ -20,14 +20,25 @@ from conftest import (
 )
 
 from collectorvision_catalog import (
+    METADATA_UNSET,
     AssetIntegrityError,
     CatalogBuild,
     CatalogDescriptor,
+    PublicDelete,
+    PublicDeltaBundle,
+    PublicUpsert,
     RecognitionRow,
     ValidationError,
     apply_delta,
+    apply_public_delta,
+    build_public_base_records,
+    build_public_delta_records,
+    build_public_embeddings,
     load_catalog_build,
     load_delta_bundle,
+    load_public_base_records,
+    load_public_delta_records,
+    load_public_embeddings,
     manifest_filename_for_catalog,
     validate_artifacts,
 )
@@ -953,4 +964,208 @@ def test_build_rejects_embedding_model_mismatch(workspace: Path) -> None:
             version="v2",
             embedding_model="other-model",
             previous_build=previous,
+        )
+
+
+def _public_row(
+    row_id: str,
+    *,
+    name: str = "Name",
+    identifiers: dict[str, str] | None = None,
+    face_index: int = 0,
+    finishes: tuple[str, ...] = (),
+    metadata: dict[str, object] | None = None,
+) -> RecognitionRow:
+    return RecognitionRow(
+        provider="test-source",
+        id=row_id,
+        name=name,
+        identifiers=identifiers or {},
+        image_url="public:none",
+        image_fingerprint="public:none",
+        face_index=face_index,
+        finishes=finishes,
+        metadata=metadata,
+    )
+
+
+def test_public_base_records_round_trip_preserves_null_and_object_metadata() -> None:
+    rows = [
+        _public_row("alpha", metadata={"set": "LEA"}),
+        _public_row("beta", metadata=None),
+        _public_row("gamma", face_index=2, finishes=("foil",), metadata={"rarity": "rare"}),
+    ]
+
+    payload = build_public_base_records(rows)
+    decoded = [
+        json.loads(line) for line in gzip.decompress(payload).decode("utf-8").splitlines()
+    ]
+    assert all("metadata" in line for line in decoded)
+    assert decoded[1]["metadata"] is None
+
+    loaded = load_public_base_records(payload, provider="test-source")
+    assert [row.key for row in loaded] == [row.key for row in rows]
+    assert [row.metadata for row in loaded] == [row.metadata for row in rows]
+    assert [row.minimal_record() for row in loaded] == [row.minimal_record() for row in rows]
+
+
+def test_load_public_base_records_requires_metadata_key() -> None:
+    line = json.dumps({"id": "alpha", "name": "Alpha", "identifiers": {}}).encode("utf-8")
+    payload = gzip.compress(line + b"\n")
+
+    with pytest.raises(ValidationError, match="missing the required metadata key"):
+        load_public_base_records(payload, provider="test-source")
+
+
+def test_public_delta_records_round_trip_covers_every_operation_shape() -> None:
+    combo_row = _public_row("combo", name="Combo Updated", metadata={"a": 1})
+    metadata_only_row = _public_row("meta-only", name="Unchanged")
+    recognition_only_row = _public_row("recog-only", name="Recognition Updated")
+    added_row = _public_row("new-row", metadata={"b": 2})
+
+    operations = [
+        PublicDelete(id="delete-me"),
+        PublicUpsert(row=combo_row, metadata={"a": 1}, embedding_index=0),
+        PublicUpsert(row=metadata_only_row, metadata=None, embedding_index=None),
+        PublicUpsert(row=recognition_only_row, embedding_index=1),
+        PublicUpsert(row=added_row, metadata={"b": 2}, embedding_index=2),
+    ]
+
+    payload = build_public_delta_records(operations)
+    decoded = [
+        json.loads(line) for line in gzip.decompress(payload).decode("utf-8").splitlines()
+    ]
+    assert decoded[0] == {"op": "delete", "id": "delete-me"}
+    assert "embedding_index" not in decoded[2]
+    assert decoded[2]["metadata"] is None
+    assert "metadata" not in decoded[3]
+
+    loaded = load_public_delta_records(payload, provider="test-source")
+    assert isinstance(loaded[0], PublicDelete)
+    assert loaded[0].id == "delete-me"
+
+    combo_loaded = loaded[1]
+    assert isinstance(combo_loaded, PublicUpsert)
+    assert combo_loaded.metadata == {"a": 1}
+    assert combo_loaded.embedding_index == 0
+    assert combo_loaded.row.minimal_record() == combo_row.minimal_record()
+
+    metadata_only_loaded = loaded[2]
+    assert metadata_only_loaded.metadata is None
+    assert metadata_only_loaded.embedding_index is None
+
+    recognition_only_loaded = loaded[3]
+    assert recognition_only_loaded.metadata is METADATA_UNSET
+    assert recognition_only_loaded.embedding_index == 1
+
+    added_loaded = loaded[4]
+    assert added_loaded.metadata == {"b": 2}
+    assert added_loaded.embedding_index == 2
+
+
+def test_public_embeddings_round_trip() -> None:
+    embeddings = np.array(
+        [[0.1, 0.2, 0.3, 0.4], [0.5, 0.6, 0.7, 0.8]], dtype=np.float16
+    )
+
+    payload = build_public_embeddings(embeddings)
+    loaded = load_public_embeddings(payload, rows=2, dim=4)
+
+    assert np.array_equal(loaded, embeddings)
+
+
+def test_load_public_embeddings_rejects_wrong_row_count() -> None:
+    embeddings = np.zeros((2, 4), dtype=np.float16)
+    payload = build_public_embeddings(embeddings)
+
+    with pytest.raises(AssetIntegrityError, match="expected"):
+        load_public_embeddings(payload, rows=3, dim=4)
+
+
+def test_apply_public_delta_reconstructs_deletes_upserts_and_preserved_metadata() -> None:
+    previous_rows = [
+        _public_row("delete-me", metadata={"x": 1}),
+        _public_row("meta-only", name="Unchanged", metadata={"old": True}),
+        _public_row("recog-only", name="Old Name", metadata={"keep": True}),
+    ]
+    previous_embeddings = np.array(
+        [[0.1, 0.1, 0.1, 0.1], [0.2, 0.2, 0.2, 0.2], [0.3, 0.3, 0.3, 0.3]],
+        dtype=np.float16,
+    )
+    new_embedding_row = np.array([[0.9, 0.9, 0.9, 0.9]], dtype=np.float16)
+
+    delta = PublicDeltaBundle(
+        operations=(
+            PublicDelete(id="delete-me"),
+            PublicUpsert(
+                row=previous_rows[1],
+                metadata={"new": True},
+                embedding_index=None,
+            ),
+            PublicUpsert(
+                row=_public_row("recog-only", name="New Name", metadata=None),
+                embedding_index=0,
+            ),
+        ),
+        embeddings=new_embedding_row,
+    )
+
+    rows, embeddings = apply_public_delta(
+        previous_rows, previous_embeddings, delta, provider="test-source"
+    )
+
+    by_key = {row.key: row for row in rows}
+    assert set(by_key) == {
+        "test-source:meta-only",
+        "test-source:recog-only",
+    }
+    assert by_key["test-source:meta-only"].metadata == {"new": True}
+    assert by_key["test-source:meta-only"].name == "Unchanged"
+    assert by_key["test-source:recog-only"].name == "New Name"
+    assert by_key["test-source:recog-only"].metadata == {"keep": True}
+    recog_index = sorted(by_key).index("test-source:recog-only")
+    assert np.array_equal(embeddings[recog_index], new_embedding_row[0])
+
+
+def test_apply_public_delta_rejects_recognition_change_without_embedding_index() -> None:
+    previous_rows = [_public_row("alpha", name="Old Name")]
+    previous_embeddings = np.array([[0.1, 0.1, 0.1, 0.1]], dtype=np.float16)
+    delta = PublicDeltaBundle(
+        operations=(
+            PublicUpsert(row=_public_row("alpha", name="New Name"), embedding_index=None),
+        ),
+        embeddings=np.empty((0, 4), dtype=np.float16),
+    )
+
+    with pytest.raises(ValidationError, match="changed recognition without embedding_index"):
+        apply_public_delta(previous_rows, previous_embeddings, delta, provider="test-source")
+
+
+def test_apply_public_delta_requires_embedding_index_for_new_rows() -> None:
+    delta = PublicDeltaBundle(
+        operations=(PublicUpsert(row=_public_row("new-row"), embedding_index=None),),
+        embeddings=np.empty((0, 4), dtype=np.float16),
+    )
+
+    with pytest.raises(ValidationError, match="requires embedding_index"):
+        apply_public_delta([], np.empty((0, 4), dtype=np.float16), delta, provider="test-source")
+
+
+def test_apply_public_delta_rejects_duplicate_embedding_indexes() -> None:
+    previous_rows = [_public_row("alpha"), _public_row("beta")]
+    previous_embeddings = np.zeros((2, 4), dtype=np.float16)
+    delta = PublicDeltaBundle(
+        operations=(
+            PublicUpsert(row=_public_row("alpha", name="Alpha 2"), embedding_index=0),
+            PublicUpsert(row=_public_row("beta", name="Beta 2"), embedding_index=0),
+        ),
+        embeddings=np.ones((1, 4), dtype=np.float16),
+    )
+
+    with pytest.raises(ValidationError, match="duplicate public delta embedding index"):
+        apply_public_delta(
+            previous_rows,
+            previous_embeddings,
+            delta,
+            provider="test-source",
         )

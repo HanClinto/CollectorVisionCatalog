@@ -248,14 +248,7 @@ def _catalog_receipt(
             if receipt.base is None
             else {
                 "rows": receipt.base.rows,
-                "recognition": {
-                    "assets": _audit_assets(
-                        receipt, root, receipt.base.recognition, files
-                    )
-                },
-                "metadata": {
-                    "assets": _audit_assets(receipt, root, receipt.base.metadata, files)
-                },
+                "assets": _audit_assets(receipt, root, receipt.base.assets, files),
             }
         ),
         "update": (
@@ -264,18 +257,9 @@ def _catalog_receipt(
             else {
                 "from_version": receipt.delta.from_version,
                 "rows": receipt.delta.rows.to_dict(),
-                "recognition": {
-                    "rows": receipt.delta.recognition.rows,
-                    "assets": _audit_assets(
-                        receipt, root, receipt.delta.recognition.assets, files
-                    ),
-                },
-                "metadata": {
-                    "rows": receipt.delta.metadata.rows,
-                    "assets": _audit_assets(
-                        receipt, root, receipt.delta.metadata.assets, files
-                    ),
-                },
+                "recognition_rows": receipt.delta.recognition_rows,
+                "metadata_rows": receipt.delta.metadata_rows,
+                "assets": _audit_assets(receipt, root, receipt.delta.assets, files),
             }
         ),
     }
@@ -314,15 +298,10 @@ def _iter_assets(catalog: Mapping[str, Any]):
         if route is None:
             continue
         route_mapping = _require_mapping(route, f"audit catalog {route_name}")
-        for layer_name in ("recognition", "metadata"):
-            layer = _require_mapping(
-                route_mapping.get(layer_name),
-                f"audit catalog {route_name} {layer_name}",
-            )
-            yield from _require_mapping(
-                layer.get("assets"),
-                f"audit catalog {route_name} {layer_name} assets",
-            ).values()
+        yield from _require_mapping(
+            route_mapping.get("assets"),
+            f"audit catalog {route_name} assets",
+        ).values()
 
 
 def _validate_catalog_receipt(
@@ -405,22 +384,15 @@ def _validate_base(
     rows: int,
     filenames: set[str],
 ) -> None:
-    _exact_fields(route, {"rows", "recognition", "metadata"}, f"{label} base")
+    _exact_fields(route, {"rows", "assets"}, f"{label} base")
     if _positive_int(route.get("rows"), f"{label} base rows") != rows:
         raise ValidationError(f"{label} base rows must match catalog rows")
-    _validate_layer(
-        _require_mapping(route.get("recognition"), f"{label} base recognition"),
-        label=f"{label} base recognition",
-        allowed={"embeddings", "identifiers"},
-        required={"embeddings", "identifiers"},
-        prefix=f"{public_name}.v{version}.base",
-        filenames=filenames,
-    )
-    _validate_layer(
-        _require_mapping(route.get("metadata"), f"{label} base metadata"),
-        label=f"{label} base metadata",
-        allowed={"records"},
-        required={"records"},
+    assets = _require_mapping(route.get("assets"), f"{label} base assets")
+    if set(assets) != {"records", "embeddings"}:
+        raise ValidationError(f"{label} base assets must be exactly records and embeddings")
+    _validate_assets(
+        assets,
+        label=f"{label} base",
         prefix=f"{public_name}.v{version}.base",
         filenames=filenames,
     )
@@ -437,7 +409,7 @@ def _validate_update(
 ) -> None:
     _exact_fields(
         route,
-        {"from_version", "rows", "recognition", "metadata"},
+        {"from_version", "rows", "recognition_rows", "metadata_rows", "assets"},
         f"{label} update",
     )
     if _non_negative_int(route.get("from_version"), f"{label} update from_version") != previous:
@@ -448,62 +420,25 @@ def _validate_update(
     )
     if changes.total == 0:
         raise ValidationError(f"{label} update rows must not be empty")
-    prefix = f"{public_name}.v{version}.delta-from-{previous}"
-    recognition_rows = _validate_update_layer(
-        _require_mapping(route.get("recognition"), f"{label} update recognition"),
-        label=f"{label} update recognition",
-        allowed={"embeddings", "identifiers"},
-        prefix=prefix,
-        filenames=filenames,
+    recognition_rows = _non_negative_int(
+        route.get("recognition_rows"), f"{label} update recognition_rows"
     )
-    metadata_rows = _validate_update_layer(
-        _require_mapping(route.get("metadata"), f"{label} update metadata"),
-        label=f"{label} update metadata",
-        allowed={"records"},
-        prefix=prefix,
-        filenames=filenames,
+    metadata_rows = _non_negative_int(
+        route.get("metadata_rows"), f"{label} update metadata_rows"
     )
     if not max(recognition_rows, metadata_rows) <= changes.total <= (
         recognition_rows + metadata_rows
     ):
         raise ValidationError(f"{label} update rows must count unique affected rows")
-
-
-def _validate_update_layer(
-    layer: Mapping[str, Any],
-    *,
-    label: str,
-    allowed: set[str],
-    prefix: str,
-    filenames: set[str],
-) -> int:
-    _exact_fields(layer, {"rows", "assets"}, label)
-    rows = _non_negative_int(layer.get("rows"), f"{label} rows")
-    assets = _require_mapping(layer.get("assets"), f"{label} assets")
-    if not set(assets).issubset(allowed):
-        raise ValidationError(f"{label} contains unsupported assets")
-    if bool(rows) != bool(assets):
-        raise ValidationError(f"{label} rows and assets must both be empty or non-empty")
-    if rows and "identifiers" in allowed and "identifiers" not in assets:
-        raise ValidationError(f"{label} requires identifiers")
-    _validate_assets(assets, label=label, prefix=prefix, filenames=filenames)
-    return rows
-
-
-def _validate_layer(
-    layer: Mapping[str, Any],
-    *,
-    label: str,
-    allowed: set[str],
-    required: set[str],
-    prefix: str,
-    filenames: set[str],
-) -> None:
-    _exact_fields(layer, {"assets"}, label)
-    assets = _require_mapping(layer.get("assets"), f"{label} assets")
-    if set(assets) != required or not set(assets).issubset(allowed):
-        raise ValidationError(f"{label} assets must be exactly {sorted(required)}")
-    _validate_assets(assets, label=label, prefix=prefix, filenames=filenames)
+    prefix = f"{public_name}.v{version}.delta-from-{previous}"
+    assets = _require_mapping(route.get("assets"), f"{label} update assets")
+    if not set(assets).issubset({"records", "embeddings"}):
+        raise ValidationError(f"{label} update contains unsupported assets")
+    if "records" not in assets:
+        raise ValidationError(f"{label} update must include a records asset")
+    if "embeddings" in assets and recognition_rows == 0:
+        raise ValidationError(f"{label} update embeddings require recognition changes")
+    _validate_assets(assets, label=f"{label} update", prefix=prefix, filenames=filenames)
 
 
 def _validate_assets(
@@ -515,8 +450,7 @@ def _validate_assets(
 ) -> None:
     suffixes = {
         "embeddings": "embeddings.f16.gz",
-        "identifiers": "identifiers.jsonl.gz",
-        "records": "metadata.jsonl.gz",
+        "records": "records.jsonl.gz",
     }
     for name, value in assets.items():
         asset = _require_mapping(value, f"{label} asset {name!r}")

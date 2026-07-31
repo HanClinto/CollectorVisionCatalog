@@ -129,13 +129,13 @@ function chip(text, kind = "") {
 
 function updateChips(stage) {
   if (!stage.update) return [chip(`${number.format(stage.rows)} base rows`)];
-  const { rows, recognition, metadata } = stage.update;
+  const { rows, recognition_rows: recognitionRows, metadata_rows: metadataRows } = stage.update;
   const chips = [];
   if (rows.added) chips.push(chip(`${rows.added} added`, "added"));
   if (rows.updated) chips.push(chip(`${rows.updated} updated`, "updated"));
   if (rows.deleted) chips.push(chip(`${rows.deleted} deleted`, "deleted"));
-  if (metadata.rows) chips.push(chip(`${metadata.rows} metadata rows`, "updated"));
-  if (recognition.rows) chips.push(chip(`${recognition.rows} recognition rows`));
+  if (metadataRows) chips.push(chip(`${metadataRows} metadata rows`, "updated"));
+  if (recognitionRows) chips.push(chip(`${recognitionRows} recognition rows`));
   return chips;
 }
 
@@ -268,19 +268,26 @@ function publicIdentifiers(record, source) {
   };
 }
 
-function applyIdentifierOperations(state, records, source) {
-  for (const operation of records) {
-    const key = identityKey(operation, source);
-    if (operation.op === "delete") state.delete(key);
-    else state.set(key, operation.record);
+function loadBaseRecords(records, source) {
+  const state = new Map();
+  for (const line of records) {
+    const { metadata, ...record } = line;
+    state.set(identityKey(line, source), { record, metadata: metadata ?? null });
   }
+  return state;
 }
 
-function applyMetadataOperations(state, records, source) {
-  for (const operation of records) {
+function applyRecordOperations(state, operations, source) {
+  for (const operation of operations) {
     const key = identityKey(operation, source);
-    if (operation.op === "delete") state.delete(key);
-    else state.set(key, operation.metadata);
+    if (operation.op === "delete") {
+      state.delete(key);
+      continue;
+    }
+    const previous = state.get(key);
+    const metadata =
+      "metadata" in operation ? operation.metadata : previous ? previous.metadata : null;
+    state.set(key, { record: operation.record, metadata });
   }
 }
 
@@ -289,44 +296,14 @@ async function reconstructPriorState(history, targetIndex) {
   while (baseIndex >= 0 && !history[baseIndex].base) baseIndex -= 1;
   if (baseIndex < 0) throw new Error("No usable base exists for this update.");
   const base = history[baseIndex];
-  const [identifierRows, metadataRows] = await Promise.all([
-    readJsonlGzip(base.base.recognition.assets.identifiers.url),
-    readJsonlGzip(base.base.metadata.assets.records.url),
-  ]);
-  if (identifierRows.length !== metadataRows.length) {
-    throw new Error("Base recognition and metadata rows are not aligned.");
-  }
-  const identifiers = new Map(
-    identifierRows.map((record) => [identityKey(record, base.source), record]),
-  );
-  const metadata = new Map(
-    identifierRows.map((record, index) => [
-      identityKey(record, base.source),
-      metadataRows[index],
-    ]),
-  );
+  const records = await readJsonlGzip(base.base.assets.records.url);
+  const state = loadBaseRecords(records, base.source);
   for (let index = baseIndex + 1; index < targetIndex; index += 1) {
     const stage = history[index];
-    const recognitionAssets = stage.update.recognition.assets;
-    const metadataAssets = stage.update.metadata.assets;
-    const jobs = [];
-    if (recognitionAssets.identifiers) {
-      jobs.push(
-        readJsonlGzip(recognitionAssets.identifiers.url).then((records) =>
-          applyIdentifierOperations(identifiers, records, stage.source),
-        ),
-      );
-    }
-    if (metadataAssets.records) {
-      jobs.push(
-        readJsonlGzip(metadataAssets.records.url).then((records) =>
-          applyMetadataOperations(metadata, records, stage.source),
-        ),
-      );
-    }
-    await Promise.all(jobs);
+    const operations = await readJsonlGzip(stage.update.assets.records.url);
+    applyRecordOperations(state, operations, stage.source);
   }
-  return { identifiers, metadata };
+  return state;
 }
 
 function changedFields(previous, current) {
@@ -385,81 +362,65 @@ function sourcePage(identifiers) {
 async function analyzeUpdate(history, index) {
   const prior = await reconstructPriorState(history, index);
   const stage = history[index];
-  const recognitionAssets = stage.update.recognition.assets;
-  const metadataAssets = stage.update.metadata.assets;
-  const [identifierOps, metadataOps] = await Promise.all([
-    recognitionAssets.identifiers
-      ? readJsonlGzip(recognitionAssets.identifiers.url)
-      : [],
-    metadataAssets.records ? readJsonlGzip(metadataAssets.records.url) : [],
-  ]);
-  const targetMetadata = new Map(
-    metadataOps
-      .filter((operation) => operation.op !== "delete")
-      .map((operation) => [identityKey(operation, stage.source), operation.metadata]),
-  );
+  const operations = await readJsonlGzip(stage.update.assets.records.url);
   const changes = new Map();
-  for (const operation of identifierOps) {
+  const targetMetadataChanges = new Map();
+  for (const operation of operations) {
     const key = identityKey(operation, stage.source);
-    const previousRecord = prior.identifiers.get(key);
-    const existed = previousRecord !== undefined;
-    const metadata = targetMetadata.get(key) || prior.metadata.get(key);
-    let kind;
-    if (operation.op === "delete") kind = "deleted";
-    else if (!existed) kind = "new card";
-    else if (JSON.stringify(previousRecord) === JSON.stringify(operation.record)) {
-      kind = "image updated";
-    } else {
-      kind = "recognition updated";
+    const previousEntry = prior.get(key);
+    if (operation.op === "delete") {
+      changes.set(key, {
+        ...describeRecord(key, previousEntry?.record, previousEntry?.metadata),
+        kinds: ["deleted"],
+        fields: [],
+        identifiers: publicIdentifiers(previousEntry?.record, stage.source),
+        metadata: previousEntry?.metadata,
+        metadataLabel: "Previous metadata",
+      });
+      continue;
     }
+    const existed = previousEntry !== undefined;
+    const recognitionChanged = "embedding_index" in operation;
+    const metadataChanged = "metadata" in operation;
+    const currentMetadata = metadataChanged
+      ? operation.metadata
+      : existed
+        ? previousEntry.metadata
+        : null;
+    const kinds = [];
+    if (!existed) {
+      kinds.push("new card");
+    } else if (recognitionChanged) {
+      const identical =
+        JSON.stringify(previousEntry.record) === JSON.stringify(operation.record);
+      kinds.push(identical ? "image updated" : "recognition updated");
+    }
+    let fields = [];
+    if (metadataChanged) {
+      targetMetadataChanges.set(key, currentMetadata);
+      fields = changedFields(existed ? previousEntry.metadata : undefined, currentMetadata);
+      if (currentMetadata === null) kinds.push("metadata removed");
+      else if (existed && previousEntry.metadata) kinds.push("metadata corrected");
+      else kinds.push("metadata added");
+    }
+    if (!kinds.length) kinds.push("updated");
     changes.set(key, {
-      ...describeRecord(key, operation.record || previousRecord, metadata),
-      kinds: [kind],
-      fields: [],
-      identifiers: publicIdentifiers(operation.record || previousRecord, stage.source),
-      metadata,
-      metadataLabel: operation.op === "delete" ? "Previous metadata" : "Metadata",
+      ...describeRecord(key, operation.record, currentMetadata),
+      kinds,
+      fields,
+      identifiers: publicIdentifiers(operation.record, stage.source),
+      metadata: currentMetadata,
+      metadataLabel: "Metadata",
     });
   }
-  for (const operation of metadataOps) {
-    const key = identityKey(operation, stage.source);
-    const previous = prior.metadata.get(key);
-    const current = operation.op === "delete" ? undefined : operation.metadata;
-    const fields = changedFields(previous, current);
-    const kind = operation.op === "delete"
-      ? "metadata removed"
-      : previous
-        ? "metadata corrected"
-        : "metadata added";
-    const existing = changes.get(key);
-    if (existing) {
-      if (!existing.kinds.includes("new card")) {
-        existing.kinds.push(kind);
-        existing.fields = fields;
-      }
-      existing.metadata = current || previous;
-      existing.metadataLabel =
-        operation.op === "delete" ? "Previous metadata" : "Metadata";
-    } else {
-      const recognition = prior.identifiers.get(key);
-      changes.set(key, {
-        ...describeRecord(key, recognition, current || previous),
-        kinds: [kind],
-        fields,
-        identifiers: publicIdentifiers(recognition, stage.source),
-        metadata: current || previous,
-        metadataLabel: operation.op === "delete" ? "Previous metadata" : "Metadata",
-      });
-    }
-  }
   const previousSets = new Set(
-    [...prior.metadata.values()].map(setIdentity).filter(Boolean),
+    [...prior.values()].map((entry) => setIdentity(entry.metadata)).filter(Boolean),
   );
   const newSets = new Map();
-  for (const metadata of targetMetadata.values()) {
+  for (const metadata of targetMetadataChanges.values()) {
     const identity = setIdentity(metadata);
     if (identity && !previousSets.has(identity)) {
-      newSets.set(identity, metadata.set_name || metadata.set || identity);
+      newSets.set(identity, metadata?.set_name || metadata?.set || identity);
     }
   }
   const rows = [...changes.values()];

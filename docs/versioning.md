@@ -39,11 +39,9 @@ integer versions:
 
 ```text
 catalog-v2/scryfall-mtg/version/10/base/embeddings.f16.gz
-catalog-v2/scryfall-mtg/version/10/base/identifiers.jsonl.gz
-catalog-v2/scryfall-mtg/version/10/base/metadata.jsonl.gz
+catalog-v2/scryfall-mtg/version/10/base/records.jsonl.gz
 catalog-v2/scryfall-mtg/version/10/delta-from-9/embeddings.f16.gz
-catalog-v2/scryfall-mtg/version/10/delta-from-9/identifiers.jsonl.gz
-catalog-v2/scryfall-mtg/version/10/delta-from-9/metadata.jsonl.gz
+catalog-v2/scryfall-mtg/version/10/delta-from-9/records.jsonl.gz
 ```
 
 The catalog key uses the same stable catalog slug after its source component,
@@ -101,17 +99,17 @@ audits.
             "version": 10,
             "rows": 110656,
             "source_updated_at": "2026-07-28T09:09:18Z",
-            "recognition": {"assets": {}},
-            "metadata": {"assets": {}}
+            "assets": {}
           },
           "updates": {
             "11": {
               "from_version": 10,
               "to_version": 11,
               "rows": {"added": 25, "updated": 37, "deleted": 0},
+              "recognition_rows": 62,
+              "metadata_rows": 25,
               "source_updated_at": "2026-07-29T09:10:00Z",
-              "recognition": {"rows": 62, "assets": {}},
-              "metadata": {"rows": 25, "assets": {}}
+              "assets": {}
             }
           }
         }
@@ -121,11 +119,17 @@ audits.
 }
 ```
 
-Real asset objects contain `url`, compressed byte `size`, and `sha256`.
-Recognition groups the mandatory embeddings and identifiers; metadata records
-are an optional client download. Base `rows` states the aligned snapshot size
-once. Update `rows` classifies each affected catalog row globally. Layer `rows`
-states the number of operations in that layer.
+Real asset objects contain `url`, compressed byte `size`, and `sha256`. The
+base `assets` object always contains the mandatory `records` and `embeddings`
+assets; the update `assets` object always contains `records` and contains
+`embeddings` only when at least one recognition change was published (an
+`embeddings` asset's physical row count equals the update's recognition
+upserts, excluding deletes). Base `rows` states the aligned snapshot size once.
+Update `rows` classifies each affected catalog row globally, while
+`recognition_rows` and `metadata_rows` separately count recognition and
+metadata operations (a whole-row delete counts toward `recognition_rows`, and
+toward `metadata_rows` only when the deleted row previously had metadata) for
+audit and feed observability.
 
 The feed advertises the newest usable checkpoint, its optional bridge update,
 and each subsequent predecessor update. Clients with no matching installed

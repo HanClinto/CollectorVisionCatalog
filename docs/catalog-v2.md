@@ -44,17 +44,18 @@ replace or mutate v1 manifests.
 
 ## Artifact layers
 
-Each catalog feed entry references independent recognition and metadata layers.
+Each catalog feed entry references one combined-record layer.
 
-### Minimal recognition layer
+### Combined recognition and metadata records
 
 The required download contains:
 
 - little-endian, row-major FP16 embeddings;
-- aligned recognition records;
+- aligned combined records, each carrying core recognition fields plus a
+  nested, optional `metadata` object;
 - the embedding model identifier and dimensions.
 
-A recognition record has this logical shape:
+A combined record has this logical shape:
 
 ```json
 {
@@ -65,7 +66,11 @@ A recognition record has this logical shape:
     "tcgplayer_product": "12345"
   },
   "face_index": 1,
-  "finishes": ["foil", "nonfoil"]
+  "finishes": ["foil", "nonfoil"],
+  "metadata": {
+    "set": "lea",
+    "collector_number": "1"
+  }
 }
 ```
 
@@ -96,6 +101,18 @@ per-face names are stored directly in their recognition records.
 need to filter candidate printings during identification. Values use
 Scryfall-compatible terms such as `nonfoil`, `foil`, `etched`, and `glossy`.
 
+`metadata` is a required key in every base record, holding either an object or
+JSON `null` when that row has no metadata. Clients that need only recognition
+can ignore the key without downloading a separate asset. Common fields
+include:
+
+- set ID, code, and name;
+- collector number;
+- rarity;
+- language;
+- converted mana cost (`cmc`);
+- face color (`colors`, not color identity).
+
 The matrix is deterministic gzip-compressed raw little-endian, row-major FP16,
 not NPZ. Raw FP16 is a shared substrate for NumPy and browsers; NPZ is
 ZIP/NumPy-specific and is poor for web streaming. Browsers can keep it packed
@@ -103,9 +120,8 @@ and convert values during dot products. Gzip remains a whole-asset download:
 assets are immutable and checksummed, and clients cache and replace a profile
 atomically. Sharding or range access should be added only after measured need.
 
-The FP16 embeddings and core recognition records are the required client
-layer. Metadata is optional. Builder state is separate and clients must not
-download it.
+The FP16 embeddings and combined records asset are the required client
+download. Builder state is separate and clients must not download it.
 
 ### Catalog coverage
 
@@ -114,20 +130,6 @@ It retains distinct artworks and printings. Promo, token, art-card, finish, and
 similar policies are lookup-time filters, not separate physical catalogs.
 Catalog coverage and model discrimination remain separate: including a
 printing does not promise accurate language or edition distinction.
-
-### Optional metadata layer
-
-Metadata is a separate gzip JSONL asset aligned one-to-one with recognition
-rows. Each line is the row's metadata object, or JSON `null` when that row has
-no metadata. It does not repeat row identity. Clients that only need
-recognition never download it. Common fields include:
-
-- set ID, code, and name;
-- collector number;
-- rarity;
-- language;
-- converted mana cost (`cmc`);
-- face color (`colors`, not color identity).
 
 ### Normalized physical attributes
 
@@ -153,7 +155,9 @@ official catalog.
 State is a private builder asset used by the next build. It is line-aligned
 with recognition rows and contains the image URL and image fingerprint without
 repeating row identity. It contains neither source images nor a cache of source
-responses.
+responses. State, along with separate private per-source identifiers and
+metadata assets, is builder-internal bookkeeping and is never published in the
+public records asset.
 
 The state and prior recognition snapshot are sufficient to reuse unchanged
 embeddings. Core-record and metadata changes are independent from image
@@ -173,13 +177,18 @@ full refresh. See [Catalog v2 versioning and paths](versioning.md) for the exact
 rules and feed shapes.
 
 Delta operations cannot rely on row alignment, so they target a row with `id`
-and an optional nonzero `face_index`. Recognition upserts carry changed core
-records and embeddings; metadata upserts carry changed metadata. Builder
-state such as image URLs and fingerprints is never published in either layer.
-Deletes use the same compact target. The provider remains catalog-level
-descriptor data.
-Recognition and metadata operations are independent and idempotent, so a
-removed row may have a delete in both layers.
+and an optional nonzero `face_index`. A single combined-record delta stream
+carries one operation per globally affected identity: a whole-row `delete`
+targets a row directly by `id`/`face_index`; an `upsert` repeats the row's full
+current core record and optionally carries a changed `metadata` value (present
+only when metadata changed; explicit `null` removes it) and an
+`embedding_index` (present only when recognition changed, referencing the
+paired FP16 embeddings asset). Builder state such as image URLs and
+fingerprints is never published. Recognition and metadata changes for the same
+row are folded into one upsert operation, so a metadata-only change repeats its
+unchanged core record without an `embedding_index`, and a recognition-only
+change omits `metadata` so clients preserve the row's predecessor metadata. The
+provider remains catalog-level descriptor data.
 
 ### Reconstructing historical Scryfall snapshots
 

@@ -56,14 +56,19 @@ For example, version 10 can provide both:
 ```text
 base/
   embeddings.f16.gz
-  identifiers.jsonl.gz
-  metadata.jsonl.gz
+  records.jsonl.gz
 
 delta-from-9/
-  embeddings.f16.gz
-  identifiers.jsonl.gz
-  metadata.jsonl.gz
+  embeddings.f16.gz   # omitted when no card's recognition changed
+  records.jsonl.gz
 ```
+
+Each `records.jsonl.gz` line is one card, combining its recognition data
+(identifiers, optional face index and finishes) with its metadata in a single
+object; metadata is `null` when a catalog does not publish it. A delta's
+`records.jsonl.gz` holds one operation per affected card — either `delete` or
+`upsert` — so recognition and metadata changes travel together instead of as
+separate files.
 
 This gives users two efficient routes:
 
@@ -100,23 +105,28 @@ flowchart TD
     D --> E
 ```
 
-## Metadata updates are optional
+## Metadata is optional per catalog
 
-Recognition and metadata are separate downloads.
+Recognition and metadata travel together in the same `records.jsonl.gz`
+download, one combined object per card. A catalog that has no metadata to
+publish simply sends `null` for every record's `metadata` field, so games
+without display metadata do not pay for a separate download or file.
 
 ```python
 import collector_vision as cv
 
-# Recognition embeddings and identifiers only.
+# Recognition only; the catalog publishes no metadata, so every record's
+# metadata field is null.
 pokemon = cv.CatalogV2("pokemon")
 
-# Recognition plus all available MTG metadata.
+# Recognition plus all available MTG metadata, carried in the same records.
 mtg = cv.CatalogV2("mtg", include_metadata=True)
 ```
 
-The Pokémon catalog does not download names, sets, or other display metadata.
-Its updates skip metadata too. The MTG catalog downloads metadata and receives
-metadata changes alongside recognition updates.
+The Pokémon catalog's records carry `metadata: null` and its updates never
+populate that field. The MTG catalog's records carry populated metadata, and
+`include_metadata=True` tells the client to keep and expose that metadata
+locally instead of discarding it after verification.
 
 This choice is made independently for every game:
 
@@ -196,13 +206,13 @@ Download:  complete version 10, then supported deltas through 15
 Result:    Lorcana version 15
 ```
 
-### Recognition without metadata
+### Recognition without stored metadata
 
 ```text
-Installed: Digimon recognition version 4
+Installed: Digimon recognition version 4 (include_metadata=False)
 Available: Digimon version 5 with recognition and metadata changes
-Download:  recognition delta only
-Result:    Digimon recognition version 5; no metadata stored
+Download:  records delta from 4 to 5 (metadata fields included as usual)
+Result:    Digimon recognition version 5; metadata verified but not stored
 ```
 
 The client makes these choices automatically. Applications normally need only

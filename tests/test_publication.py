@@ -58,17 +58,19 @@ def test_initial_version_publishes_only_readable_base_paths(workspace: Path) -> 
     assert manifest.delta is None
     assert manifest.base is not None
     assert manifest.base.rows == 1
-    assert set(manifest.base.recognition) == {"embeddings", "identifiers"}
-    assert set(manifest.base.metadata) == {"records"}
+    assert set(manifest.base.assets) == {"records", "embeddings"}
     assert {
         asset.path for asset in manifest.base.assets.values()
     } == {
         "base/embeddings.f16.gz",
-        "base/identifiers.jsonl.gz",
-        "base/metadata.jsonl.gz",
+        "base/records.jsonl.gz",
     }
     for asset in manifest.base.assets.values():
         assert (path / asset.path).is_file()
+    with gzip.open(path / "base/records.jsonl.gz", "rt") as stream:
+        records = [json.loads(line) for line in stream]
+    assert records
+    assert all("metadata" in record for record in records)
     assert CatalogVersionManifest.from_dict(manifest.to_dict()) == manifest
 
 
@@ -114,7 +116,7 @@ def test_public_manifest_rejects_removed_asset_rows(workspace: Path) -> None:
         plan_catalog_version(None),
     )
     payload = manifest.to_dict()
-    payload["base"]["recognition"]["assets"]["identifiers"]["rows"] = 1
+    payload["base"]["assets"]["records"]["rows"] = 1
 
     with pytest.raises(ValidationError, match="published asset fields"):
         CatalogVersionManifest.from_dict(payload)
@@ -141,16 +143,16 @@ def test_incremental_version_publishes_only_delta(workspace: Path) -> None:
         "updated": 1,
         "deleted": 0,
     }
-    assert manifest.delta.recognition.rows == 1
-    assert manifest.delta.metadata.rows == 1
-    assert set(manifest.delta.recognition.assets) == {"embeddings", "identifiers"}
-    assert set(manifest.delta.metadata.assets) == {"records"}
+    assert manifest.delta.recognition_rows == 1
+    assert manifest.delta.metadata_rows == 1
+    assert set(manifest.delta.assets) == {"records", "embeddings"}
     assert not (path / "base").exists()
     assert (path / "delta-from-0/embeddings.f16.gz").is_file()
-    with gzip.open(path / "delta-from-0/identifiers.jsonl.gz", "rt") as stream:
+    with gzip.open(path / "delta-from-0/records.jsonl.gz", "rt") as stream:
         operations = [json.loads(line) for line in stream]
     assert operations
-    assert all("state" not in operation for operation in operations)
+    assert all(operation["op"] == "upsert" for operation in operations)
+    assert all("state" not in operation["record"] for operation in operations)
 
 
 def test_routine_and_hard_checkpoints_have_distinct_routes(workspace: Path) -> None:
@@ -233,11 +235,13 @@ def test_delete_only_delta_does_not_require_embeddings(workspace: Path) -> None:
         "updated": 0,
         "deleted": 1,
     }
-    assert manifest.delta.recognition.rows == 1
-    assert manifest.delta.metadata.rows == 0
-    assert set(manifest.delta.recognition.assets) == {"identifiers"}
-    assert manifest.delta.metadata.assets == {}
+    assert manifest.delta.recognition_rows == 1
+    assert manifest.delta.metadata_rows == 0
+    assert set(manifest.delta.assets) == {"records"}
     assert CatalogVersionManifest.from_dict(manifest.to_dict()) == manifest
+    with gzip.open(path / "delta-from-0/records.jsonl.gz", "rt") as stream:
+        operations = [json.loads(line) for line in stream]
+    assert operations == [{"op": "delete", "id": "beta"}]
 
 
 def test_metadata_only_delta_omits_recognition_assets(workspace: Path) -> None:
@@ -277,11 +281,16 @@ def test_metadata_only_delta_omits_recognition_assets(workspace: Path) -> None:
         "updated": 1,
         "deleted": 0,
     }
-    assert manifest.delta.recognition.rows == 0
-    assert manifest.delta.recognition.assets == {}
-    assert manifest.delta.metadata.rows == 1
-    assert set(manifest.delta.metadata.assets) == {"records"}
+    assert manifest.delta.recognition_rows == 0
+    assert manifest.delta.metadata_rows == 1
+    assert set(manifest.delta.assets) == {"records"}
     assert CatalogVersionManifest.from_dict(manifest.to_dict()) == manifest
+    with gzip.open(path / "delta-from-0/records.jsonl.gz", "rt") as stream:
+        operations = [json.loads(line) for line in stream]
+    assert len(operations) == 1
+    assert operations[0]["op"] == "upsert"
+    assert operations[0]["metadata"] == {"set": "Renamed"}
+    assert "embedding_index" not in operations[0]
 
 
 def test_publication_rejects_tampered_builder_asset(workspace: Path) -> None:

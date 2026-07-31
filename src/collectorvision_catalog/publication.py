@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import gzip
 import json
 import shutil
 from collections.abc import Mapping
@@ -9,24 +8,31 @@ from hashlib import sha256
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+import numpy as np
+from numpy.typing import NDArray
+
 from .artifacts import (
+    METADATA_UNSET,
     AssetInfo,
     CatalogBuild,
     CatalogDescriptor,
+    PublicDelete,
+    PublicOperation,
+    PublicUpsert,
+    RecognitionRow,
     SourceRevision,
     ValidationError,
     _require_mapping,
     _require_non_empty_string,
     _requires_delta_upsert,
+    build_public_base_records,
+    build_public_delta_records,
+    build_public_embeddings,
 )
 from .versioning import CatalogVersionPlan, validate_public_name, version_root
 
-BASE_ASSETS = ("embeddings", "identifiers", "metadata")
-DELTA_ASSETS = {
-    "embeddings_delta": "embeddings",
-    "identifiers_delta": "identifiers",
-    "metadata_delta": "metadata",
-}
+BASE_ASSET_NAMES = {"records", "embeddings"}
+DELTA_ASSET_NAMES = {"records", "embeddings"}
 
 
 def _exact_fields(payload: Mapping[str, Any], expected: set[str], name: str) -> None:
@@ -89,7 +95,7 @@ class ChangeCounts:
 
 
 @dataclass(frozen=True)
-class LayerRoute:
+class BaseRoute:
     rows: int
     assets: dict[str, PublishedAsset]
 
@@ -100,93 +106,41 @@ class LayerRoute:
         }
 
     @classmethod
-    def from_dict(
-        cls,
-        payload: Mapping[str, Any],
-        *,
-        name: str,
-        allowed_assets: set[str],
-    ) -> LayerRoute:
-        _exact_fields(payload, {"rows", "assets"}, name)
-        rows = _non_negative_int(payload.get("rows"), f"{name}.rows")
-        assets = _assets_from_dict(payload.get("assets"), f"{name}.assets")
-        if not set(assets).issubset(allowed_assets):
-            raise ValidationError(f"{name} contains unsupported assets")
-        if bool(rows) != bool(assets):
-            raise ValidationError(f"{name} rows and assets must both be empty or non-empty")
-        return cls(rows=rows, assets=assets)
-
-
-@dataclass(frozen=True)
-class BaseRoute:
-    rows: int
-    recognition: dict[str, PublishedAsset]
-    metadata: dict[str, PublishedAsset]
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "rows": self.rows,
-            "recognition": {"assets": _assets_to_dict(self.recognition)},
-            "metadata": {"assets": _assets_to_dict(self.metadata)},
-        }
-
-    @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> BaseRoute:
-        _exact_fields(payload, {"rows", "recognition", "metadata"}, "base")
-        recognition_payload = _require_mapping(
-            payload.get("recognition"), "base.recognition"
-        )
-        metadata_payload = _require_mapping(payload.get("metadata"), "base.metadata")
-        _exact_fields(recognition_payload, {"assets"}, "base.recognition")
-        _exact_fields(metadata_payload, {"assets"}, "base.metadata")
-        recognition = _assets_from_dict(
-            recognition_payload.get("assets"),
-            "base.recognition.assets",
-        )
-        metadata = _assets_from_dict(
-            metadata_payload.get("assets"),
-            "base.metadata.assets",
-        )
-        if set(recognition) != {"embeddings", "identifiers"}:
-            raise ValidationError("base recognition assets must be embeddings and identifiers")
-        if set(metadata) != {"records"}:
-            raise ValidationError("base metadata asset must be records")
+        _exact_fields(payload, {"rows", "assets"}, "base")
+        assets = _assets_from_dict(payload.get("assets"), "base.assets")
+        if set(assets) != BASE_ASSET_NAMES:
+            raise ValidationError("base assets must be exactly records and embeddings")
         route = cls(
             rows=_positive_int(payload.get("rows"), "base.rows"),
-            recognition=recognition,
-            metadata=metadata,
+            assets=assets,
         )
         _validate_route_asset_paths(route.assets, PurePosixPath("base"), "base")
         return route
-
-    @property
-    def assets(self) -> dict[str, PublishedAsset]:
-        return {
-            **self.recognition,
-            "metadata": self.metadata["records"],
-        }
 
 
 @dataclass(frozen=True)
 class DeltaRoute:
     from_version: int
     rows: ChangeCounts
-    recognition: LayerRoute
-    metadata: LayerRoute
+    recognition_rows: int
+    metadata_rows: int
+    assets: dict[str, PublishedAsset]
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "from_version": self.from_version,
             "rows": self.rows.to_dict(),
-            "recognition": self.recognition.to_dict(),
-            "metadata": self.metadata.to_dict(),
+            "recognition_rows": self.recognition_rows,
+            "metadata_rows": self.metadata_rows,
+            "assets": _assets_to_dict(self.assets),
         }
 
     @classmethod
     def from_dict(cls, payload: Mapping[str, Any]) -> DeltaRoute:
         _exact_fields(
             payload,
-            {"from_version", "rows", "recognition", "metadata"},
+            {"from_version", "rows", "recognition_rows", "metadata_rows", "assets"},
             "delta",
         )
         from_version = _non_negative_int(payload.get("from_version"), "delta.from_version")
@@ -195,32 +149,29 @@ class DeltaRoute:
         )
         if rows.total == 0:
             raise ValidationError("delta rows must not be empty")
-        recognition = LayerRoute.from_dict(
-            _require_mapping(payload.get("recognition"), "delta.recognition"),
-            name="delta.recognition",
-            allowed_assets={"embeddings", "identifiers"},
+        recognition_rows = _non_negative_int(
+            payload.get("recognition_rows"), "delta.recognition_rows"
         )
-        metadata = LayerRoute.from_dict(
-            _require_mapping(payload.get("metadata"), "delta.metadata"),
-            name="delta.metadata",
-            allowed_assets={"records"},
-        )
-        if recognition.rows and "identifiers" not in recognition.assets:
-            raise ValidationError("recognition updates require identifiers")
-        if "embeddings" in recognition.assets and "identifiers" not in recognition.assets:
-            raise ValidationError("delta embeddings require identifiers")
+        metadata_rows = _non_negative_int(payload.get("metadata_rows"), "delta.metadata_rows")
+        assets = _assets_from_dict(payload.get("assets"), "delta.assets")
+        if not set(assets).issubset(DELTA_ASSET_NAMES):
+            raise ValidationError("delta contains unsupported assets")
+        if "records" not in assets:
+            raise ValidationError("delta must include a records asset")
+        if "embeddings" in assets and recognition_rows == 0:
+            raise ValidationError("delta embeddings require recognition changes")
         expected_parent = PurePosixPath(f"delta-from-{from_version}")
-        _validate_route_asset_paths(recognition.assets, expected_parent, "recognition delta")
-        _validate_route_asset_paths(metadata.assets, expected_parent, "metadata delta")
-        if not max(recognition.rows, metadata.rows) <= rows.total <= (
-            recognition.rows + metadata.rows
+        _validate_route_asset_paths(assets, expected_parent, "delta")
+        if not max(recognition_rows, metadata_rows) <= rows.total <= (
+            recognition_rows + metadata_rows
         ):
             raise ValidationError("delta rows must count unique affected catalog rows")
         return cls(
             from_version=from_version,
             rows=rows,
-            recognition=recognition,
-            metadata=metadata,
+            recognition_rows=recognition_rows,
+            metadata_rows=metadata_rows,
+            assets=assets,
         )
 
 
@@ -342,13 +293,14 @@ def publish_catalog_version(
     )
     if expected_previous != plan.previous_version:
         raise ValidationError("builder previous_version does not match publication plan")
-    changes = (
-        _change_summary(build, previous_build)
-        if plan.publish_delta
-        else None
-    )
 
     source_root = Path(build_dir)
+    _verify_builder_assets(build.manifest.assets, source_root)
+
+    delta_summary = (
+        _build_public_delta(build, previous_build) if plan.publish_delta else None
+    )
+
     version_dir = Path(output_root) / version_root(public_name, plan.version)
     if version_dir.exists():
         raise ValidationError(f"catalog version already exists: {version_dir}")
@@ -357,38 +309,10 @@ def publish_catalog_version(
     if staging_dir.exists():
         raise ValidationError(f"catalog version staging path already exists: {staging_dir}")
     try:
-        base_assets = (
-            _publish_assets(
-                build.manifest.assets,
-                BASE_ASSETS,
-                source_root,
-                staging_dir,
-                "base",
-            )
-            if plan.publish_base
-            else None
-        )
-        base_route = (
-            None
-            if base_assets is None
-            else BaseRoute(
-                rows=build.manifest.rows,
-                recognition={
-                    "embeddings": base_assets["embeddings"],
-                    "identifiers": base_assets["identifiers"],
-                },
-                metadata={"records": base_assets["metadata"]},
-            )
-        )
-        delta_assets = (
-            _publish_assets(
-                build.manifest.assets,
-                DELTA_ASSETS,
-                source_root,
-                staging_dir,
-                f"delta-from-{plan.previous_version}",
-            )
-            if plan.publish_delta
+        base_route = _publish_base(build, staging_dir) if plan.publish_base else None
+        delta_route = (
+            _publish_delta_route(delta_summary, plan.previous_version, staging_dir)
+            if delta_summary is not None
             else None
         )
         manifest = CatalogVersionManifest(
@@ -403,30 +327,7 @@ def publish_catalog_version(
             dim=build.manifest.dim,
             dtype=build.manifest.dtype,
             base=base_route,
-            delta=(
-                None
-                if delta_assets is None
-                else DeltaRoute(
-                    from_version=plan.previous_version,
-                    rows=changes.rows,
-                    recognition=LayerRoute(
-                        rows=changes.recognition.total,
-                        assets={
-                            name: asset
-                            for name, asset in delta_assets.items()
-                            if name in {"embeddings", "identifiers"}
-                        },
-                    ),
-                    metadata=LayerRoute(
-                        rows=changes.metadata.total,
-                        assets=(
-                            {"records": delta_assets["metadata"]}
-                            if "metadata" in delta_assets
-                            else {}
-                        ),
-                    ),
-                )
-            ),
+            delta=delta_route,
         )
         manifest = CatalogVersionManifest.from_dict(manifest.to_dict())
         staging_dir.replace(version_dir)
@@ -442,78 +343,170 @@ def load_catalog_version_manifest(path: str | Path) -> CatalogVersionManifest:
     return CatalogVersionManifest.from_dict(_require_mapping(payload, "catalog version manifest"))
 
 
-def _publish_assets(
-    source_assets: Mapping[str, AssetInfo],
-    names: tuple[str, ...] | Mapping[str, str],
-    source_root: Path,
-    version_dir: Path,
-    route: str,
-) -> dict[str, PublishedAsset]:
-    name_map = {name: name for name in names} if isinstance(names, tuple) else names
-    published: dict[str, PublishedAsset] = {}
-    for source_name, public_name in name_map.items():
-        asset = source_assets.get(source_name)
-        if asset is None:
-            if source_name in BASE_ASSETS:
-                raise ValidationError(f"builder manifest is missing required asset {source_name!r}")
-            continue
-        filename = _public_filename(public_name, asset.filename)
-        relative_path = f"{route}/{filename}"
-        destination = version_dir / relative_path
-        source = source_root / asset.filename
-        payload = source.read_bytes()
+def _verify_builder_assets(assets: Mapping[str, AssetInfo], source_root: Path) -> None:
+    """Re-verify every builder asset on disk still matches its own manifest.
+
+    Publication rebuilds public payloads from the in-memory ``CatalogBuild``
+    rather than re-reading builder files, so this defends against a builder
+    output directory that was tampered with or corrupted after the build.
+    """
+    for name, asset in assets.items():
+        path = source_root / asset.filename
+        try:
+            payload = path.read_bytes()
+        except OSError as error:
+            raise ValidationError(f"cannot read builder asset {name!r}: {error}") from error
         if len(payload) != asset.size or sha256(payload).hexdigest() != asset.sha256:
-            raise ValidationError(f"builder asset {source_name!r} failed integrity validation")
-        public_payload = _public_asset_payload(source_name, payload)
-        destination.parent.mkdir(parents=True, exist_ok=True)
-        destination.write_bytes(public_payload)
-        published[public_name] = PublishedAsset(
-            path=relative_path,
-            size=len(public_payload),
-            sha256=sha256(public_payload).hexdigest(),
-        )
-    return published
+            raise ValidationError(f"builder asset {name!r} failed integrity validation")
 
 
-def _public_asset_payload(source_name: str, payload: bytes) -> bytes:
-    if source_name != "identifiers_delta":
-        return payload
-    try:
-        records = [
-            _require_mapping(json.loads(line), "identifier delta operation")
-            for line in gzip.decompress(payload).splitlines()
-        ]
-    except (gzip.BadGzipFile, json.JSONDecodeError, UnicodeDecodeError) as error:
-        raise ValidationError("builder identifier delta is not valid gzip JSONL") from error
-    public_records = []
-    for record in records:
-        operation = dict(record)
-        operation.pop("state", None)
-        public_records.append(operation)
-    jsonl = b"".join(
-        json.dumps(
-            record,
-            allow_nan=False,
-            ensure_ascii=False,
-            separators=(",", ":"),
-            sort_keys=True,
-        ).encode("utf-8")
-        + b"\n"
-        for record in public_records
-    )
-    return gzip.compress(jsonl, compresslevel=9, mtime=0)
-
-
-def _public_filename(name: str, source_filename: str) -> str:
-    suffixes = {
-        "embeddings": ".f16.gz",
-        "identifiers": ".jsonl.gz",
-        "metadata": ".jsonl.gz",
+def _publish_base(build: CatalogBuild, staging_dir: Path) -> BaseRoute:
+    route_dir = staging_dir / "base"
+    records_payload = build_public_base_records(build.rows)
+    embeddings_payload = build_public_embeddings(build.embeddings)
+    assets = {
+        "records": _write_public_asset(records_payload, "records.jsonl.gz", route_dir),
+        "embeddings": _write_public_asset(embeddings_payload, "embeddings.f16.gz", route_dir),
     }
-    suffix = suffixes[name]
-    if not source_filename.endswith(suffix):
-        raise ValidationError(f"unexpected builder filename for {name!r}: {source_filename!r}")
-    return f"{name}{suffix}"
+    return BaseRoute(rows=build.manifest.rows, assets=assets)
+
+
+@dataclass(frozen=True)
+class _PublicDeltaSummary:
+    operations: tuple[PublicOperation, ...]
+    embeddings: NDArray[np.float16]
+    rows: ChangeCounts
+    recognition_rows: int
+    metadata_rows: int
+
+
+def _build_public_delta(
+    build: CatalogBuild, previous_build: CatalogBuild | None
+) -> _PublicDeltaSummary:
+    if previous_build is None:
+        raise ValidationError("previous_build is required to publish a delta")
+    if build.manifest.previous_version != previous_build.manifest.version:
+        raise ValidationError("previous_build version does not match builder manifest")
+    if build.manifest.catalog_key != previous_build.manifest.catalog_key:
+        raise ValidationError("previous_build catalog does not match builder manifest")
+    if build.manifest.embedding_model != previous_build.manifest.embedding_model:
+        raise ValidationError(
+            "previous_build embedding model does not match builder manifest"
+        )
+
+    previous_rows: dict[str, RecognitionRow] = {row.key: row for row in previous_build.rows}
+    current_rows: dict[str, RecognitionRow] = {row.key: row for row in build.rows}
+    current_index = {row.key: index for index, row in enumerate(build.rows)}
+    previous_keys = set(previous_rows)
+    current_keys = set(current_rows)
+    deleted_keys = previous_keys - current_keys
+    added_keys = current_keys - previous_keys
+    surviving_keys = previous_keys & current_keys
+    recognition_changed = {
+        key
+        for key in surviving_keys
+        if _requires_delta_upsert(previous_rows[key], current_rows[key])
+    } | added_keys
+
+    previous_metadata = {
+        key: row.metadata for key, row in previous_rows.items() if row.metadata is not None
+    }
+    current_metadata = {
+        key: row.metadata for key, row in current_rows.items() if row.metadata is not None
+    }
+    metadata_changed = {
+        key
+        for key in surviving_keys | added_keys
+        if previous_metadata.get(key) != current_metadata.get(key)
+    }
+
+    if not deleted_keys and not recognition_changed and not metadata_changed:
+        raise ValidationError("cannot publish an empty delta")
+
+    operations: list[PublicOperation] = []
+    embedding_rows: list[NDArray[np.float16]] = []
+    recognition_rows_count = 0
+    metadata_rows_count = 0
+    for key in sorted(deleted_keys):
+        previous_row = previous_rows[key]
+        operations.append(PublicDelete(id=previous_row.id, face_index=previous_row.face_index))
+        recognition_rows_count += 1
+        if key in previous_metadata:
+            metadata_rows_count += 1
+
+    for key in sorted(recognition_changed | metadata_changed):
+        row = current_rows[key]
+        needs_embedding = key in recognition_changed
+        metadata_touched = key in metadata_changed
+        embedding_index: int | None = None
+        if needs_embedding:
+            embedding_index = len(embedding_rows)
+            embedding_rows.append(build.embeddings[current_index[key]])
+            recognition_rows_count += 1
+        metadata_value = current_metadata.get(key) if metadata_touched else METADATA_UNSET
+        if metadata_touched:
+            metadata_rows_count += 1
+        operations.append(
+            PublicUpsert(
+                row=row.with_metadata(None),
+                metadata=metadata_value,
+                embedding_index=embedding_index,
+            )
+        )
+
+    rows = ChangeCounts(
+        added=len(added_keys),
+        updated=len((recognition_changed | metadata_changed) - added_keys),
+        deleted=len(deleted_keys),
+    )
+    embeddings = (
+        np.vstack(embedding_rows).astype(np.float16, copy=False)
+        if embedding_rows
+        else np.empty((0, build.embeddings.shape[1]), dtype=np.float16)
+    )
+    if recognition_rows_count != build.manifest.delta.operations:
+        raise ValidationError("recognition change counts do not match builder delta")
+    if metadata_rows_count != build.manifest.delta.metadata_operations:
+        raise ValidationError("metadata change counts do not match builder delta")
+    return _PublicDeltaSummary(
+        operations=tuple(operations),
+        embeddings=embeddings,
+        rows=rows,
+        recognition_rows=recognition_rows_count,
+        metadata_rows=metadata_rows_count,
+    )
+
+
+def _publish_delta_route(
+    summary: _PublicDeltaSummary, previous_version: int, staging_dir: Path
+) -> DeltaRoute:
+    route_dir = staging_dir / f"delta-from-{previous_version}"
+    assets = {
+        "records": _write_public_asset(
+            build_public_delta_records(summary.operations), "records.jsonl.gz", route_dir
+        ),
+    }
+    if len(summary.embeddings):
+        assets["embeddings"] = _write_public_asset(
+            build_public_embeddings(summary.embeddings), "embeddings.f16.gz", route_dir
+        )
+    return DeltaRoute(
+        from_version=previous_version,
+        rows=summary.rows,
+        recognition_rows=summary.recognition_rows,
+        metadata_rows=summary.metadata_rows,
+        assets=assets,
+    )
+
+
+def _write_public_asset(payload: bytes, filename: str, directory: Path) -> PublishedAsset:
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / filename).write_bytes(payload)
+    return PublishedAsset(
+        path=f"{directory.name}/{filename}",
+        size=len(payload),
+        sha256=sha256(payload).hexdigest(),
+    )
 
 
 def _validate_routes(
@@ -531,6 +524,8 @@ def _validate_routes(
         raise ValidationError("catalog version must contain a base or delta")
     if delta is not None and delta.from_version != previous_version:
         raise ValidationError("delta.from_version must match previous_version")
+
+
 def _validate_route_asset_paths(
     assets: Mapping[str, PublishedAsset],
     expected_parent: PurePosixPath,
@@ -581,83 +576,3 @@ def _builder_version(value: str, name: str) -> int:
     if not value.isascii() or not value.isdecimal():
         raise ValidationError(f"builder manifest {name} must be a non-negative integer")
     return int(value)
-
-
-@dataclass(frozen=True)
-class _ChangeSummary:
-    rows: ChangeCounts
-    recognition: ChangeCounts
-    metadata: ChangeCounts
-
-
-def _change_summary(build: CatalogBuild, previous_build: CatalogBuild | None) -> _ChangeSummary:
-    if previous_build is None:
-        raise ValidationError("previous_build is required to publish a delta")
-    if build.manifest.previous_version != previous_build.manifest.version:
-        raise ValidationError("previous_build version does not match builder manifest")
-    if build.manifest.catalog_key != previous_build.manifest.catalog_key:
-        raise ValidationError("previous_build catalog does not match builder manifest")
-    if build.manifest.embedding_model != previous_build.manifest.embedding_model:
-        raise ValidationError("previous_build embedding model does not match builder manifest")
-    previous_rows = {row.key: row for row in previous_build.rows}
-    current_rows = {row.key: row for row in build.rows}
-    previous_keys = set(previous_rows)
-    current_keys = set(current_rows)
-    recognition_added = current_keys - previous_keys
-    recognition_deleted = previous_keys - current_keys
-    recognition_updated = {
-        key
-        for key in previous_keys & current_keys
-        if _requires_delta_upsert(previous_rows[key], current_rows[key])
-    }
-
-    previous_metadata = {
-        key: row.metadata for key, row in previous_rows.items() if row.metadata is not None
-    }
-    current_metadata = {
-        key: row.metadata for key, row in current_rows.items() if row.metadata is not None
-    }
-    previous_metadata_keys = set(previous_metadata)
-    current_metadata_keys = set(current_metadata)
-    metadata_added = current_metadata_keys - previous_metadata_keys
-    metadata_deleted = previous_metadata_keys - current_metadata_keys
-    metadata_updated = {
-        key
-        for key in previous_metadata_keys & current_metadata_keys
-        if previous_metadata[key] != current_metadata[key]
-    }
-    affected = (
-        recognition_added
-        | recognition_updated
-        | recognition_deleted
-        | metadata_added
-        | metadata_updated
-        | metadata_deleted
-    )
-    if not affected:
-        raise ValidationError("cannot publish an empty delta")
-    added = current_keys - previous_keys
-    deleted = previous_keys - current_keys
-    updated = affected - added - deleted
-    summary = _ChangeSummary(
-        rows=ChangeCounts(
-            added=len(added),
-            updated=len(updated),
-            deleted=len(deleted),
-        ),
-        recognition=ChangeCounts(
-            added=len(recognition_added),
-            updated=len(recognition_updated),
-            deleted=len(recognition_deleted),
-        ),
-        metadata=ChangeCounts(
-            added=len(metadata_added),
-            updated=len(metadata_updated),
-            deleted=len(metadata_deleted),
-        ),
-    )
-    if summary.recognition.total != build.manifest.delta.operations:
-        raise ValidationError("recognition change counts do not match builder delta")
-    if summary.metadata.total != build.manifest.delta.metadata_operations:
-        raise ValidationError("metadata change counts do not match builder delta")
-    return summary

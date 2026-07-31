@@ -94,7 +94,7 @@ def test_release_audit_detects_asset_tampering(workspace: Path) -> None:
         inputs={"catalog_config": config},
     )
     catalog = audit.payload["families"]["milo1"]["catalogs"]["scryfall/mtg"]
-    filename = catalog["base"]["recognition"]["assets"]["identifiers"]["filename"]
+    filename = catalog["base"]["assets"]["records"]["filename"]
     (output / filename).write_bytes(b"tampered")
 
     with pytest.raises(ValidationError, match="failed integrity"):
@@ -121,17 +121,17 @@ def test_release_audit_rejects_malformed_nested_records(workspace: Path) -> None
 
     extra_field = deepcopy(audit.to_dict())
     asset = extra_field["families"]["milo1"]["catalogs"]["scryfall/mtg"]["base"][
-        "recognition"
-    ]["assets"]["identifiers"]
+        "assets"
+    ]["records"]
     asset["unexpected"] = True
     with pytest.raises(ValidationError, match="fields must be exactly"):
         ReleaseAudit.from_dict(extra_field)
 
     unsafe_filename = deepcopy(audit.to_dict())
     asset = unsafe_filename["families"]["milo1"]["catalogs"]["scryfall/mtg"]["base"][
-        "recognition"
-    ]["assets"]["identifiers"]
-    asset["filename"] = "../identifiers.jsonl.gz"
+        "assets"
+    ]["records"]
+    asset["filename"] = "../records.jsonl.gz"
     with pytest.raises(ValidationError, match="safe flat asset filename"):
         ReleaseAudit.from_dict(unsafe_filename)
 
