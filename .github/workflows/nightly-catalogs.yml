@@ -11,7 +11,7 @@ on:
         type: string
 
 permissions:
-  actions: read
+  actions: write
   contents: write
 
 concurrency:
@@ -188,3 +188,4 @@ jobs:
           git commit -m "Publish ${TAG} catalog feed"
           git pull --rebase origin main
           git push origin HEAD:main
+          gh workflow run deploy-pages.yml --repo "$GITHUB_REPOSITORY" --ref main
