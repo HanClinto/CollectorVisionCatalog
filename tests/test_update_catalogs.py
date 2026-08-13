@@ -599,3 +599,71 @@ def test_full_build_writes_release_index_and_summary(tmp_path: Path) -> None:
     assert quality_report["catalogs"]["milo1/scryfall/mtg"]["source_revision"] == (
         summary["catalogs"][0]["source_revision"]
     )
+
+
+def test_catalog_local_update_skips_unchanged_rows(tmp_path: Path) -> None:
+    config_path = tmp_path / "catalogs.json"
+    make_config(config_path)
+    previous_dir = tmp_path / "previous"
+    updater.build_enabled_catalogs(
+        config_path=config_path,
+        previous_dir=tmp_path / "empty",
+        output_dir=previous_dir,
+        version="0",
+        allow_full_rebuild=True,
+        source_rows_factory=lambda source: [make_row()],
+        embedder_factory=lambda model, batch: lambda images: np.array([[1.0, 0.0]]),
+        image_loader=lambda url: Image.new("RGB", (2, 2)),
+    )
+    output_dir = tmp_path / "update"
+
+    summary = updater.build_enabled_catalogs(
+        config_path=config_path,
+        previous_dir=previous_dir,
+        output_dir=output_dir,
+        version={"milo1/scryfall/mtg": "1"},
+        source_rows_factory=lambda source: [make_row()],
+        embedder_factory=lambda model, batch: pytest.fail("unchanged catalog ran inference"),
+        image_loader=lambda url: pytest.fail("unchanged catalog loaded an image"),
+        skip_unchanged=True,
+    )
+
+    assert summary["changed"] is False
+    assert summary["catalogs"][0]["changed"] is False
+    assert not (output_dir / "catalog-index-v2.json").exists()
+    assert not (output_dir / "milo1--scryfall--mtg.manifest.json").exists()
+
+
+def test_catalog_local_update_publishes_descriptor_only_changes(tmp_path: Path) -> None:
+    config_path = tmp_path / "catalogs.json"
+    make_config(config_path)
+    previous_dir = tmp_path / "previous"
+    updater.build_enabled_catalogs(
+        config_path=config_path,
+        previous_dir=tmp_path / "empty",
+        output_dir=previous_dir,
+        version="0",
+        allow_full_rebuild=True,
+        source_rows_factory=lambda source: [make_row()],
+        embedder_factory=lambda model, batch: lambda images: np.array([[1.0, 0.0]]),
+        image_loader=lambda url: Image.new("RGB", (2, 2)),
+    )
+    payload = json.loads(config_path.read_text())
+    payload["catalogs"][0]["descriptor"]["description"] = "Revised description."
+    config_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    summary = updater.build_enabled_catalogs(
+        config_path=config_path,
+        previous_dir=previous_dir,
+        output_dir=tmp_path / "update",
+        version={"milo1/scryfall/mtg": "1"},
+        source_rows_factory=lambda source: [make_row()],
+        embedder_factory=lambda model, batch: lambda images: pytest.fail(
+            "reused row ran inference"
+        ),
+        image_loader=lambda url: pytest.fail("reused row loaded an image"),
+        skip_unchanged=True,
+    )
+
+    assert summary["changed"] is True
+    assert summary["catalogs"][0]["changed"] is True

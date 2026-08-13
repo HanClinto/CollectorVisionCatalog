@@ -9,6 +9,7 @@ from collectorvision_catalog import (
     CatalogFeed,
     CatalogVersionPlan,
     ValidationError,
+    advance_catalog_feed,
     load_catalog_feed,
     plan_catalog_version,
     publish_catalog_version,
@@ -137,6 +138,37 @@ def test_hard_checkpoint_drops_earlier_deltas(workspace: Path) -> None:
     assert [
         (update.from_version, update.to_version) for update in entry.updates.values()
     ] == [(10, 11)]
+
+
+def test_existing_feed_advances_without_local_historical_assets(workspace: Path) -> None:
+    build0, record0 = _publish(workspace, 0)
+    _, record1 = _publish(workspace, 1, build0)
+    feed = _feed([record0])
+
+    advanced = advance_catalog_feed(
+        feed,
+        {CATALOG_KEY: record1},
+        checked_at="2026-07-30T20:00:00Z",
+    )
+
+    entry = _entry(advanced)
+    assert advanced.checked_at == "2026-07-30T20:00:00Z"
+    assert entry.current_version == 1
+    assert entry.base == _entry(feed).base
+    assert list(entry.updates) == [1]
+
+
+def test_existing_feed_rejects_noncontiguous_publication(workspace: Path) -> None:
+    build0, record0 = _publish(workspace, 0)
+    build1, _ = _publish(workspace, 1, build0)
+    _, record2 = _publish(workspace, 2, build1)
+
+    with pytest.raises(ValidationError, match="advance the current"):
+        advance_catalog_feed(
+            _feed([record0]),
+            {CATALOG_KEY: record2},
+            checked_at="2026-07-30T20:00:00Z",
+        )
 
 
 def test_invalid_history_is_rejected(workspace: Path) -> None:

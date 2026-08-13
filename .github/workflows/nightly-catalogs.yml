@@ -1,0 +1,188 @@
+name: Publish Catalog v2 Nightly
+
+on:
+  schedule:
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+    inputs:
+      bootstrap_release:
+        description: Draft release tag containing builder-state.tar.gz for the first run
+        required: false
+        type: string
+
+permissions:
+  actions: read
+  contents: write
+
+concurrency:
+  group: catalog-v2-nightly
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    env:
+      GH_TOKEN: ${{ github.token }}
+      COLLECTORVISION_PROVIDER: cpu
+      WORK_ROOT: ${{ github.workspace }}/.nightly
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install builder dependencies
+        run: |
+          python -m pip install -e .
+          python -m pip install onnxruntime \
+            "collectorvision @ git+https://github.com/HanClinto/CollectorVision.git@9d45a37ebfe40f22ece70507015645de134dc3ec"
+
+      - name: Restore private builder state
+        env:
+          BOOTSTRAP_RELEASE: ${{ inputs.bootstrap_release }}
+        run: |
+          mkdir -p "$WORK_ROOT/state-artifact"
+          artifact_json="$(gh api \
+            "repos/$GITHUB_REPOSITORY/actions/artifacts?name=catalog-v2-builder-state&per_page=100")"
+          run_id="$(jq -r \
+            '[.artifacts[] | select(.expired == false)] | sort_by(.created_at) | last | .workflow_run.id // empty' \
+            <<<"$artifact_json")"
+          if [[ -n "$run_id" ]]; then
+            gh run download "$run_id" \
+              --repo "$GITHUB_REPOSITORY" \
+              --name catalog-v2-builder-state \
+              --dir "$WORK_ROOT/state-artifact"
+          elif [[ -n "$BOOTSTRAP_RELEASE" ]]; then
+            gh release download "$BOOTSTRAP_RELEASE" \
+              --repo "$GITHUB_REPOSITORY" \
+              --pattern builder-state.tar.gz \
+              --dir "$WORK_ROOT"
+            tar -xzf "$WORK_ROOT/builder-state.tar.gz" -C "$WORK_ROOT/state-artifact"
+          else
+            echo "No builder-state artifact exists; dispatch with bootstrap_release." >&2
+            exit 1
+          fi
+          python - <<'PY'
+          import json
+          import shutil
+          from pathlib import Path
+
+          root = Path(".nightly/state-artifact")
+          feed = json.loads(Path("catalog-feed-v2.json").read_text())
+          versions = {
+              f"{family}/{key}": str(catalog["current_version"])
+              for family, family_payload in feed["families"].items()
+              for key, catalog in family_payload["catalogs"].items()
+          }
+          candidates = [root / "next", root / "current", root]
+          for candidate in candidates:
+              manifests = {}
+              for path in candidate.glob("*.manifest.json"):
+                  payload = json.loads(path.read_text())
+                  manifests[payload["catalog_key"]] = str(payload["version"])
+              if manifests == versions:
+                  destination = Path(".nightly/private-state")
+                  shutil.copytree(candidate, destination)
+                  break
+          else:
+              raise SystemExit("No retained builder state matches the checked-out feed")
+          PY
+          test -n "$(find "$WORK_ROOT/private-state" -name '*.manifest.json' -print -quit)"
+
+      - name: Restore rebuildable image cache
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.WORK_ROOT }}/image-cache
+          key: catalog-v2-images-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            catalog-v2-images-${{ runner.os }}-
+
+      - name: Capture source revisions
+        run: |
+          mkdir -p "$WORK_ROOT"
+          python scripts/assemble_release.py source-status \
+            --output "$WORK_ROOT/source-status.json"
+
+      - name: Build and stage changed catalogs
+        id: build
+        run: |
+          source_date="$(jq -r .suggested_date_suffix "$WORK_ROOT/source-status.json")"
+          tag="catalog-v2-$source_date"
+          published_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          python scripts/nightly_catalogs.py \
+            --previous-dir "$WORK_ROOT/private-state" \
+            --work-dir "$WORK_ROOT/work" \
+            --output-feed "$WORK_ROOT/catalog-feed-v2.json" \
+            --release-dir "$WORK_ROOT/release" \
+            --next-state-dir "$WORK_ROOT/next-state" \
+            --cache-root "$WORK_ROOT/image-cache" \
+            --source-status "$WORK_ROOT/source-status.json" \
+            --tag "$tag" \
+            --published-at "$published_at" \
+            --repository "$GITHUB_REPOSITORY" \
+            --commit "$GITHUB_SHA"
+          changed="$(jq -r .changed "$WORK_ROOT/work/nightly-summary.json")"
+          echo "changed=$changed" >> "$GITHUB_OUTPUT"
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Preserve private builder state
+        run: |
+          mkdir -p "$WORK_ROOT/state-bundle/current"
+          cp -R "$WORK_ROOT/private-state"/. "$WORK_ROOT/state-bundle/current/"
+          if [[ "${{ steps.build.outputs.changed }}" == "true" ]]; then
+            mkdir -p "$WORK_ROOT/state-bundle/next"
+            cp -R "$WORK_ROOT/next-state"/. "$WORK_ROOT/state-bundle/next/"
+          fi
+
+      - name: Upload private builder state
+        uses: actions/upload-artifact@v4
+        with:
+          name: catalog-v2-builder-state
+          path: ${{ env.WORK_ROOT }}/state-bundle/
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: Publish release and moving feed
+        if: steps.build.outputs.changed == 'true'
+        env:
+          TAG: ${{ steps.build.outputs.tag }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            if jq -e --arg tag "$TAG" '.releases | index($tag)' \
+              catalog-publication-v2.json >/dev/null; then
+              echo "Published release $TAG already exists; refusing to overwrite it." >&2
+              exit 1
+            fi
+            gh release delete "$TAG" --repo "$GITHUB_REPOSITORY" --cleanup-tag -y
+          fi
+          gh release create "$TAG" "$WORK_ROOT"/release/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --prerelease \
+            --title "CollectorVision Catalog v2 beta (${TAG#catalog-v2-})" \
+            --notes "Automated Catalog v2 beta checkpoint."
+
+          cp "$WORK_ROOT/catalog-feed-v2.json" catalog-feed-v2.json
+          TAG="$TAG" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          path = Path("catalog-publication-v2.json")
+          payload = json.loads(path.read_text())
+          tag = os.environ["TAG"]
+          if tag in payload["releases"]:
+              raise SystemExit(f"publication already contains {tag}")
+          payload["releases"].append(tag)
+          path.write_text(json.dumps(payload, indent=2) + "\n")
+          PY
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add catalog-feed-v2.json catalog-publication-v2.json
+          git commit -m "Publish ${TAG} catalog feed"
+          git pull --rebase origin main
+          git push origin HEAD:main

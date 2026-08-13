@@ -10,13 +10,16 @@ predecessor deltas, historical Scryfall replay, and immutable version staging
 are implemented.
 
 The family-scoped feed, release audits, catalog-first Pages layout, and
-CollectorVision Python/browser consumers are implemented. The remaining
-Catalog v2 release-automation work is:
+CollectorVision Python/browser consumers are implemented. The catalog-local
+updater skips unchanged catalogs, assigns each changed catalog its own next
+integer version, and stages audited public assets through
+[`scripts/nightly_catalogs.py`](scripts/nightly_catalogs.py).
 
-1. Assign catalog-local versions in the updater and skip unchanged catalogs.
-2. Persist private builder state between GitHub Actions runs.
-3. Publish changed catalogs, the moving feed, and Pages from one nightly
-   GitHub Actions pipeline.
+The scheduled nightly workflow retains private builder state as a rolling
+90-day GitHub Actions artifact. Rebuildable source images use the Actions cache
+and are not part of that artifact. Every successful run uploads builder state,
+including no-change runs, so catalogs can remain unchanged indefinitely
+without losing their update baseline.
 
 The builder now emits compact primary `id` plus optional `face_index` records
 with line-aligned metadata. The published historical beta checkpoints have been
@@ -47,6 +50,12 @@ Pages deployment is assembled by
 [`.github/workflows/deploy-pages.yml`](.github/workflows/deploy-pages.yml).
 The earlier incompatible beta producer was removed so that it cannot overwrite
 the active feed while the catalog-local nightly producer is being integrated.
+
+The first nightly run needs a one-time bootstrap. Upload
+`builder-state.tar.gz` to a draft release and dispatch **Publish Catalog v2
+Nightly** with that draft tag in `bootstrap_release`. After the successful run
+has uploaded `catalog-v2-builder-state`, delete the draft release. Subsequent
+runs restore the newest non-expired artifact automatically.
 
 ## Historical Scryfall replay
 

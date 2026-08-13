@@ -535,6 +535,86 @@ def update_catalog_feed(
     )
 
 
+def advance_catalog_feed(
+    feed: CatalogFeed,
+    publications: Mapping[str, tuple[str | Path, CatalogVersionManifest]],
+    *,
+    checked_at: str,
+) -> CatalogFeed:
+    """Advance an existing feed with newly published catalog-local versions."""
+    families = {
+        family_name: CatalogFamily(
+            embedding=family.embedding,
+            catalogs=dict(family.catalogs),
+        )
+        for family_name, family in feed.families.items()
+    }
+    for catalog_key, (version_path, manifest) in sorted(publications.items()):
+        family_name, local_key = _split_catalog_key(catalog_key)
+        family = families.get(family_name)
+        if family is None or local_key not in family.catalogs:
+            raise ValidationError(f"catalog {catalog_key!r} is not present in the feed")
+        current = family.catalogs[local_key]
+        if manifest.catalog_key != catalog_key:
+            raise ValidationError("manifest catalog_key does not match its feed key")
+        if manifest.public_name != current.public_name:
+            raise ValidationError("catalog public_name changed from the existing feed")
+        if manifest.previous_version != current.current_version:
+            raise ValidationError("published catalog does not advance the current feed version")
+        if manifest.version != current.current_version + 1:
+            raise ValidationError("published catalog version must advance by exactly one")
+        contract = EmbeddingContract(
+            model=manifest.embedding_model,
+            dimensions=manifest.dim,
+            dtype=manifest.dtype,
+        )
+        if contract != family.embedding:
+            raise ValidationError("published catalog changed its embedding contract")
+        _validate_receipt_assets(Path(version_path), manifest)
+
+        if manifest.base is None:
+            base = current.base
+            updates = dict(current.updates)
+        else:
+            base = SnapshotReference(
+                version=manifest.version,
+                rows=manifest.base.rows,
+                source_updated_at=manifest.source_revision.updated_at,
+                assets=_asset_references(
+                    manifest.public_name,
+                    manifest.version,
+                    manifest.base.assets,
+                ),
+            )
+            updates = {}
+        if manifest.delta is not None:
+            update = _delta_reference(manifest)
+            updates[update.to_version] = update
+
+        catalogs = dict(family.catalogs)
+        catalogs[local_key] = CatalogFeedEntry.from_dict(
+            CatalogFeedEntry(
+                public_name=manifest.public_name,
+                descriptor=manifest.descriptor,
+                current_version=manifest.version,
+                rows=manifest.rows,
+                source_updated_at=manifest.source_revision.updated_at,
+                base=base,
+                updates=updates,
+            ).to_dict()
+        )
+        families[family_name] = CatalogFamily(
+            embedding=family.embedding,
+            catalogs=catalogs,
+        )
+    return CatalogFeed.from_dict(
+        CatalogFeed(
+            checked_at=normalize_rfc3339_utc(checked_at),
+            families=families,
+        ).to_dict()
+    )
+
+
 def write_catalog_feed(path: str | Path, feed: CatalogFeed) -> None:
     validated = CatalogFeed.from_dict(feed.to_dict())
     Path(path).write_text(

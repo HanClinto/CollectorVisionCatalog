@@ -31,6 +31,7 @@ from collectorvision_catalog import (
     build_catalog,
     load_catalog_build,
     manifest_filename_for_catalog,
+    max_source_updated_at,
     normalize_rfc3339_utc,
     validate_artifacts,
     write_catalog_index,
@@ -447,7 +448,7 @@ def build_enabled_catalogs(
     quality_overrides_path: Path = Path("config/source-quality-overrides.json"),
     previous_dir: Path,
     output_dir: Path,
-    version: str,
+    version: str | Mapping[str, str],
     allow_full_rebuild: bool = False,
     image_dirs: Sequence[Path] = (),
     cache_root: Path | None = None,
@@ -457,6 +458,7 @@ def build_enabled_catalogs(
     scryfall_source_override: Mapping[str, Any] | None = None,
     embedder_factory: Callable[[str, int], Embedder] | None = None,
     image_loader: ImageLoader | None = None,
+    skip_unchanged: bool = False,
 ) -> dict[str, Any]:
     configs = [catalog for catalog in load_config(config_path) if catalog.enabled]
     if not configs:
@@ -528,12 +530,16 @@ def build_enabled_catalogs(
             raise ValidationError(f"unsupported source type {source_type!r}")
         previous_manifest = previous_dir / manifest_filename_for_catalog(config.key)
         previous: CatalogBuild | None = None
+        previous_descriptor = None
+        previous_embedding_model = None
         seed_embeddings = None
         seed_fingerprints: dict[str, str] | None = None
         seed_label = config.key
         seed_inference_limit = config.max_changed_rows
         if previous_manifest.exists():
             previous = load_catalog_build(previous_manifest, asset_dir=previous_dir)
+            previous_descriptor = previous.manifest.descriptor
+            previous_embedding_model = previous.manifest.embedding_model
             if previous.manifest.descriptor != config.descriptor:
                 old = previous.manifest.descriptor
                 new = config.descriptor
@@ -629,6 +635,27 @@ def build_enabled_catalogs(
                     f"catalog {config.key!r} has {changed_rows:,} image changes, exceeding "
                     f"its safety limit of {config.max_changed_rows:,}; run a reviewed local rebuild"
                 )
+            if (
+                skip_unchanged
+                and previous.manifest.descriptor == config.descriptor
+                and previous.manifest.embedding_model == config.embedding_model
+                and _rows_match_previous(rows, previous)
+            ):
+                summaries.append(
+                    {
+                        "catalog_key": config.key,
+                        "rows": previous.manifest.rows,
+                        "delta_operations": 0,
+                        "metadata_delta_operations": 0,
+                        "seed_embeddings_reused": 0,
+                        "seed_embeddings_computed": 0,
+                        "changed": False,
+                        "quality_excluded_rows": len(quality_result.findings),
+                        "source_unavailable_rows": len(unavailable_keys),
+                        "source_revision": snapshot.revision.to_dict(),
+                    }
+                )
+                continue
         if image_loader is not None:
             effective_image_loader = image_loader
         elif cache_root is not None:
@@ -666,7 +693,7 @@ def build_enabled_catalogs(
             embedder=embedder_factory(config.embedding_model, batch_size),
             output_dir=output_dir,
             catalog_key=config.key,
-            version=version,
+            version=_version_for_catalog(version, config.key),
             embedding_model=config.embedding_model,
             source_revision=snapshot.revision,
             descriptor=config.descriptor,
@@ -695,6 +722,8 @@ def build_enabled_catalogs(
                     0 if seed_embeddings is None else len(missing_seed_keys)
                 ),
                 "changed": previous is None
+                or previous_descriptor != config.descriptor
+                or previous_embedding_model != config.embedding_model
                 or previous.manifest.source_revision != snapshot.revision
                 or build.manifest.delta.operations > 0
                 or build.manifest.delta.metadata_operations > 0,
@@ -704,11 +733,15 @@ def build_enabled_catalogs(
             }
         )
 
-    index_path = output_dir / "catalog-index-v2.json"
-    index = write_catalog_index(index_path, version, manifests)
+    source_updated_at = max_source_updated_at(
+        snapshot.revision for snapshot in snapshots.values()
+    )
+    if isinstance(version, str) and manifests:
+        index_path = output_dir / "catalog-index-v2.json"
+        source_updated_at = write_catalog_index(index_path, version, manifests).source_updated_at
     summary = {
-        "version": version,
-        "source_updated_at": index.source_updated_at,
+        "version": version if isinstance(version, str) else dict(sorted(version.items())),
+        "source_updated_at": source_updated_at,
         "changed": any(item["changed"] for item in summaries),
         "catalogs": summaries,
         "quality_excluded_rows": sum(
@@ -1124,6 +1157,35 @@ def _required_text(value: Any, name: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise ValidationError(f"{name} must be a non-empty string")
     return value.strip()
+
+
+def _version_for_catalog(version: str | Mapping[str, str], catalog_key: str) -> str:
+    if isinstance(version, str):
+        return _required_text(version, "version")
+    if set(version) == set():
+        raise ValidationError("catalog versions must not be empty")
+    try:
+        value = version[catalog_key]
+    except KeyError as error:
+        raise ValidationError(f"catalog versions are missing {catalog_key!r}") from error
+    return _required_text(value, f"catalog version for {catalog_key!r}")
+
+
+def _rows_match_previous(rows: Sequence[RecognitionRow], previous: CatalogBuild) -> bool:
+    if len(rows) != len(previous.rows):
+        return False
+
+    def signatures(values: Sequence[RecognitionRow]) -> dict[str, tuple[Any, ...]]:
+        return {
+            row.key: (
+                row.minimal_record(),
+                row.state_record(),
+                row.metadata,
+            )
+            for row in values
+        }
+
+    return signatures(rows) == signatures(previous.rows)
 
 
 def _non_negative_int(value: Any, name: str) -> int:
