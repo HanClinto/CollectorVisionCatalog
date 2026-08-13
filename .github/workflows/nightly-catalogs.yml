@@ -83,6 +83,8 @@ jobs:
           for candidate in candidates:
               manifests = {}
               for path in candidate.glob("*.manifest.json"):
+                  if path.name.startswith("._"):
+                      continue
                   payload = json.loads(path.read_text())
                   manifests[payload["catalog_key"]] = str(payload["version"])
               if manifests == versions:
