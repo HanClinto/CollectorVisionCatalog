@@ -40,7 +40,7 @@ jobs:
         run: |
           python -m pip install -e .
           python -m pip install onnxruntime \
-            "collectorvision @ git+https://github.com/HanClinto/CollectorVision.git@9d45a37ebfe40f22ece70507015645de134dc3ec"
+            "collectorvision[hf] @ git+https://github.com/HanClinto/CollectorVision.git@9d45a37ebfe40f22ece70507015645de134dc3ec"
 
       - name: Restore private builder state
         env:
