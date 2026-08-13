@@ -29,7 +29,8 @@ The moving feed is published at:
 https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/catalog-feed-v2.json
 ```
 
-`checked_at` advances even when no catalog changes. Each family defines one
+Each completed source check can advance `checked_at` even when no catalog
+changes. Each family defines one
 immutable embedding contract, while each catalog records its source freshness
 and supported routes to its current version. Dates are feed and audit metadata,
 not storage identity.
@@ -219,7 +220,7 @@ python scripts/update_catalogs.py \
 ```
 
 The second build uses the reconstructed first snapshot as its exact base and
-produces normal identifier, embedding, and metadata deltas. `--scryfall-bulk-format`
+produces the normal combined-record and embedding deltas. `--scryfall-bulk-format`
 can explicitly select `json` or `jsonl` when a filename has no recognizable
 extension. `--scryfall-bulk-identity` can record an archive-specific identifier;
 otherwise the normalized file or download URI is retained as the identity.
@@ -309,10 +310,12 @@ incremental embedding updates. Prices are not downloaded.
 
 ## Compatibility and rollout
 
-CollectorVision Python and browser consumers have not yet been updated to this
-active contract. They must gain integer catalog versions, alternative
-checkpoint routes, and catalog-first URLs before the beta is testable end to
-end.
+CollectorVision's Python and browser clients consume this active contract,
+including integer catalog versions, checkpoint routes, combined records,
+catalog-first URLs, checksum validation, and persistent caches. The
+[Catalog Explorer](https://hanclinto.github.io/CollectorVisionCatalog/) and
+browser client are deployed publicly, and the nightly workflow publishes
+changed catalogs atomically after preserving private builder state.
 
 Catalog v1 remains supported independently. Catalog v2 has no compatibility
 requirement before its stable release, so discarded prototype code will be

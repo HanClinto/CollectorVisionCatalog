@@ -4,8 +4,9 @@ Ready-to-search card recognition data for
 [CollectorVision](https://github.com/HanClinto/CollectorVision).
 
 Choose a game, load its catalog, and identify cards from image embeddings.
-Catalog v2 keeps recognition downloads small, offers optional card metadata,
-and updates changed cards without repeatedly downloading the entire catalog.
+Catalog v2 keeps downloads small, lets applications retain optional card
+metadata only when needed, and updates changed cards without repeatedly
+downloading the entire catalog.
 
 > [!NOTE]
 > Catalog v2 is in beta. Browse supported games and recent changes in the
@@ -36,7 +37,9 @@ match = catalog.search_records(embedding, top_k=1)[0]
 print(match["card_id"], match["metadata"])
 ```
 
-Omit `include_metadata=True` for the smallest recognition-only download.
+Omit `include_metadata=True` for the smallest steady-state memory and cache
+footprint. Recognition and metadata share one compressed records download; the
+client discards metadata after validation when it is not requested.
 
 </details>
 
@@ -65,8 +68,8 @@ model.
 
 | Catalog v1 | Catalog v2 |
 | --- | --- |
-| One convenient NPZ file | Compact FP16 recognition plus compressed JSONL |
-| Card IDs with minimal built-in data | Recognition-ready finishes plus optional names, sets, colors, and other metadata |
+| One convenient NPZ file | Compact raw FP16 plus compressed combined-record JSONL |
+| Card IDs with minimal built-in data | Always-available names and peer IDs, plus optionally retained sets, colors, and other metadata |
 | Updates replace the whole file | Updates normally download only changed rows |
 | Great for custom-built catalogs | Great for hosted, bandwidth-conscious applications |
 
@@ -79,9 +82,13 @@ incremental updates.
 
 Your first installation downloads a complete catalog. Later updates normally
 download only cards that changed, with automatic full refreshes when needed.
-Each game and optional metadata package updates independently.
+Each game and source updates independently.
 
 [Learn how catalog updates work](docs/catalog-updates.md).
+
+Existing applications can keep using Catalog v1 while adopting v2 one surface
+at a time. See the
+[Catalog v1 to v2 migration guide](https://github.com/HanClinto/CollectorVision/blob/main/docs/catalog-v2-migration.md).
 
 Contributor setup and architecture are documented in
 [DEVELOPMENT.md](DEVELOPMENT.md).

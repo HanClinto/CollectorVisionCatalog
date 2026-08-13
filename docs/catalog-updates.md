@@ -105,28 +105,26 @@ flowchart TD
     D --> E
 ```
 
-## Metadata is optional per catalog
+## Metadata retention is optional
 
 Recognition and metadata travel together in the same `records.jsonl.gz`
-download, one combined object per card. A catalog that has no metadata to
-publish simply sends `null` for every record's `metadata` field, so games
-without display metadata do not pay for a separate download or file.
+download, one combined object per card. A row with no metadata uses `null`.
+`include_metadata` controls whether the client retains metadata after parsing;
+it does not select a different network asset.
 
 ```python
 import collector_vision as cv
 
-# Recognition only; the catalog publishes no metadata, so every record's
-# metadata field is null.
+# Recognition only. Metadata is validated and then discarded.
 pokemon = cv.CatalogV2("pokemon")
 
-# Recognition plus all available MTG metadata, carried in the same records.
+# Recognition plus retained MTG metadata, carried in the same records.
 mtg = cv.CatalogV2("mtg", include_metadata=True)
 ```
 
-The Pokémon catalog's records carry `metadata: null` and its updates never
-populate that field. The MTG catalog's records carry populated metadata, and
-`include_metadata=True` tells the client to keep and expose that metadata
-locally instead of discarding it after verification.
+Both catalogs may publish populated metadata. `include_metadata=True` tells the
+client to keep and expose it locally instead of discarding it after
+verification.
 
 This choice is made independently for every game:
 
@@ -166,9 +164,9 @@ replace the working local catalog. A later online load can retry the update.
 
 ## Update schedule
 
-During the Catalog v2 beta, upstream refreshes are published manually while the
-catalog-local producer and durable private build state are integrated into
-GitHub Actions. The intended production schedule is one source check nightly.
+During the Catalog v2 beta, GitHub Actions checks upstream sources nightly.
+Private builder state is retained between runs, while rebuildable source images
+use a separate cache.
 
 A source check does not automatically create a version. A catalog advances only
 when its effective recognition data, identifiers, or metadata have changed.
