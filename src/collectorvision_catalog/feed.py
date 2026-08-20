@@ -25,6 +25,7 @@ from .versioning import validate_public_name
 
 FEED_FILENAME = "catalog-feed-v2.json"
 PUBLIC_BASE_URL = "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2"
+DEFAULT_RETAINED_DELTAS = 30
 _CHECKSUM = re.compile(r"^[0-9a-f]{64}$")
 
 
@@ -331,16 +332,15 @@ class CatalogFeedEntry:
                 raise ValidationError("feed update key must match to_version")
             updates[version] = update
         ordered_updates = tuple(updates[version] for version in sorted(updates))
-        expected = (
-            base.version - 1
-            if ordered_updates and ordered_updates[0].to_version == base.version
-            else base.version
-        )
+        expected = ordered_updates[0].from_version if ordered_updates else base.version
+        route_start = expected
         for update in ordered_updates:
             if update.from_version != expected:
                 raise ValidationError("feed update chain is not contiguous")
             expected = update.to_version
         reached = base.version if not ordered_updates else ordered_updates[-1].to_version
+        if route_start > base.version:
+            raise ValidationError("feed update chain does not connect its base")
         if reached != current_version:
             raise ValidationError("feed update chain does not reach current_version")
         entry = cls(
@@ -448,11 +448,16 @@ CatalogHistory = Sequence[tuple[str | Path, CatalogVersionManifest]]
 
 
 def update_catalog_feed(
-    catalog_histories: Mapping[str, CatalogHistory], *, checked_at: str
+    catalog_histories: Mapping[str, CatalogHistory],
+    *,
+    checked_at: str,
+    retained_deltas: int = DEFAULT_RETAINED_DELTAS,
 ) -> CatalogFeed:
     """Build the active feed from each catalog's complete ordered manifest history."""
     if not catalog_histories:
         raise ValidationError("catalog feed must contain at least one catalog")
+    if retained_deltas <= 0:
+        raise ValidationError("retained_deltas must be positive")
     family_entries: dict[str, dict[str, CatalogFeedEntry]] = {}
     family_contracts: dict[str, EmbeddingContract] = {}
     public_names: set[str] = set()
@@ -493,9 +498,19 @@ def update_catalog_feed(
                 public_name, base_manifest.version, base_manifest.base.assets
             ),
         )
-        delta_indexes = list(range(base_index + 1, len(manifests)))
-        if base_manifest.delta is not None:
-            delta_indexes.insert(0, base_index)
+        hard_checkpoint_index = max(
+            (
+                index
+                for index, manifest in enumerate(manifests)
+                if manifest.base is not None and manifest.delta is None
+            ),
+            default=-1,
+        )
+        delta_indexes = [
+            index
+            for index in range(hard_checkpoint_index + 1, len(manifests))
+            if manifests[index].delta is not None
+        ][-retained_deltas:]
         updates = tuple(
             _delta_reference(manifests[index]) for index in delta_indexes
         )
@@ -540,8 +555,11 @@ def advance_catalog_feed(
     publications: Mapping[str, tuple[str | Path, CatalogVersionManifest]],
     *,
     checked_at: str,
+    retained_deltas: int = DEFAULT_RETAINED_DELTAS,
 ) -> CatalogFeed:
     """Advance an existing feed with newly published catalog-local versions."""
+    if retained_deltas <= 0:
+        raise ValidationError("retained_deltas must be positive")
     families = {
         family_name: CatalogFamily(
             embedding=family.embedding,
@@ -574,7 +592,6 @@ def advance_catalog_feed(
 
         if manifest.base is None:
             base = current.base
-            updates = dict(current.updates)
         else:
             base = SnapshotReference(
                 version=manifest.version,
@@ -586,10 +603,15 @@ def advance_catalog_feed(
                     manifest.base.assets,
                 ),
             )
-            updates = {}
+        updates = (
+            {}
+            if manifest.base is not None and manifest.delta is None
+            else dict(current.updates)
+        )
         if manifest.delta is not None:
             update = _delta_reference(manifest)
             updates[update.to_version] = update
+        updates = dict(sorted(updates.items())[-retained_deltas:])
 
         catalogs = dict(family.catalogs)
         catalogs[local_key] = CatalogFeedEntry.from_dict(

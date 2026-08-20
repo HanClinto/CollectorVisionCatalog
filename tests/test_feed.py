@@ -44,11 +44,22 @@ def _build(workspace: Path, version: int, previous=None):
     return build, directory
 
 
-def _publish(workspace: Path, version: int, previous=None, *, hard: bool = False):
+def _publish(
+    workspace: Path,
+    version: int,
+    previous=None,
+    *,
+    hard: bool = False,
+    checkpoint_interval: int = 10,
+):
     build, directory = _build(workspace, version, previous)
     previous_version = None if previous is None else int(previous.manifest.version)
     plan = (
-        plan_catalog_version(previous_version, force_full_refresh=hard)
+        plan_catalog_version(
+            previous_version,
+            checkpoint_interval=checkpoint_interval,
+            force_full_refresh=hard,
+        )
         if previous_version is None or version == previous_version + 1
         else CatalogVersionPlan(version, previous_version, True, False)
     )
@@ -156,6 +167,96 @@ def test_existing_feed_advances_without_local_historical_assets(workspace: Path)
     assert entry.current_version == 1
     assert entry.base == _entry(feed).base
     assert list(entry.updates) == [1]
+
+
+def test_routine_checkpoint_retains_a_rolling_delta_route(workspace: Path) -> None:
+    previous, record = _publish(workspace, 0)
+    feed = _feed([record])
+    for version in range(1, 7):
+        current, record = _publish(
+            workspace,
+            version,
+            previous,
+            checkpoint_interval=3,
+        )
+        feed = advance_catalog_feed(
+            feed,
+            {CATALOG_KEY: record},
+            checked_at=f"2026-07-{version + 1:02d}T20:00:00Z",
+            retained_deltas=3,
+        )
+        previous = current
+
+    entry = _entry(feed)
+    assert entry.base.version == 6
+    assert list(entry.updates) == [4, 5, 6]
+    assert entry.updates[4].from_version == 3
+
+    current, record = _publish(
+        workspace,
+        7,
+        previous,
+        checkpoint_interval=3,
+    )
+    feed = advance_catalog_feed(
+        feed,
+        {CATALOG_KEY: record},
+        checked_at="2026-07-12T20:00:00Z",
+        retained_deltas=3,
+    )
+    entry = _entry(feed)
+    assert entry.base.version == 6
+    assert list(entry.updates) == [5, 6, 7]
+    assert entry.updates[5].from_version == 4
+
+
+def test_full_history_feed_retains_the_same_rolling_route(workspace: Path) -> None:
+    history = []
+    previous = None
+    for version in range(8):
+        current, record = _publish(
+            workspace,
+            version,
+            previous,
+            checkpoint_interval=3,
+        )
+        history.append(record)
+        previous = current
+
+    entry = _entry(
+        update_catalog_feed(
+            {CATALOG_KEY: history},
+            checked_at="2026-07-12T20:00:00Z",
+            retained_deltas=3,
+        )
+    )
+
+    assert entry.base.version == 6
+    assert list(entry.updates) == [5, 6, 7]
+    assert entry.updates[5].from_version == 4
+
+
+def test_retained_window_must_not_disconnect_base(workspace: Path) -> None:
+    previous, record = _publish(workspace, 0)
+    feed = _feed([record])
+    for version in range(1, 3):
+        current, record = _publish(workspace, version, previous)
+        if version == 2:
+            with pytest.raises(ValidationError, match="connect its base"):
+                advance_catalog_feed(
+                    feed,
+                    {CATALOG_KEY: record},
+                    checked_at="2026-07-30T20:00:00Z",
+                    retained_deltas=1,
+                )
+        else:
+            feed = advance_catalog_feed(
+                feed,
+                {CATALOG_KEY: record},
+                checked_at="2026-07-29T20:00:00Z",
+                retained_deltas=1,
+            )
+        previous = current
 
 
 def test_existing_feed_rejects_noncontiguous_publication(workspace: Path) -> None:

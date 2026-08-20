@@ -169,8 +169,9 @@ image download or inference.
 
 Version 0 contains a complete base. Changed catalogs normally publish only an
 exact-predecessor delta. At the configured checkpoint interval—10 versions by
-default—a routine checkpoint publishes both a complete base and the predecessor
-delta. Existing clients continue incrementally while new clients start from the
+default—a routine checkpoint publishes a new complete base while retaining a
+rolling route of the 30 newest deltas. Recently used clients continue
+incrementally across the checkpoint while new or older clients start from the
 new base.
 
 A hard checkpoint publishes a base without a delta and deliberately forces a

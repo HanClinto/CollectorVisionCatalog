@@ -57,7 +57,8 @@ clear when a URL is copied, cached, or logged without the feed.
 1. Version 0 is the initial checkpoint and contains a base.
 2. A changed catalog advances by exactly one version.
 3. Ordinary versions contain an exact-predecessor update.
-4. Routine checkpoints contain both a base and the predecessor update.
+4. Routine checkpoints contain a base and retain the newest 30 predecessor
+   updates as one contiguous route.
 5. Hard checkpoints contain only a base and force a full refresh.
 
 A different embedding contract starts a different family rather than
@@ -131,9 +132,11 @@ metadata operations (a whole-row delete counts toward `recognition_rows`, and
 toward `metadata_rows` only when the deleted row previously had metadata) for
 audit and feed observability.
 
-The feed advertises the newest usable checkpoint, its optional bridge update,
-and each subsequent predecessor update. Clients with no matching installed
-version download the base and then apply updates after `base.version`.
+The feed advertises the newest usable checkpoint and one contiguous rolling
+route of up to 30 predecessor updates ending at `current_version`. The base may
+sit in the middle of that route. Clients within the retained window continue
+from their installed version; clients with no matching version download the
+base and apply only updates after `base.version`.
 
 ## Release audits
 

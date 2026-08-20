@@ -72,12 +72,15 @@ def finalize_nightly(
     inputs: Mapping[str, Path],
     checked_at: str,
     checkpoint_interval: int = 10,
+    retained_deltas: int = 30,
 ) -> dict[str, Any]:
     changed_keys = [
         item["catalog_key"] for item in summary["catalogs"] if item.get("changed") is True
     ]
     if not changed_keys:
         return {"changed": False, "tag": None, "catalogs": {}}
+    if retained_deltas < checkpoint_interval:
+        raise ValidationError("retained_deltas must be at least checkpoint_interval")
     entries = _feed_entries(feed)
 
     publications = {}
@@ -126,7 +129,12 @@ def finalize_nightly(
         inputs=inputs,
     )
     validate_catalog_release(release_dir)
-    advanced = advance_catalog_feed(feed, publications, checked_at=checked_at)
+    advanced = advance_catalog_feed(
+        feed,
+        publications,
+        checked_at=checked_at,
+        retained_deltas=retained_deltas,
+    )
     write_catalog_feed(output_feed, advanced)
     _write_builder_state(next_builds, next_state_dir)
     return {
@@ -178,6 +186,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--commit", required=True)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--checkpoint-interval", type=int, default=10)
+    parser.add_argument("--retained-deltas", type=int, default=30)
     return parser.parse_args(argv)
 
 
@@ -223,6 +232,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         inputs=inputs,
         checked_at=published_at,
         checkpoint_interval=args.checkpoint_interval,
+        retained_deltas=args.retained_deltas,
     )
     result["source_updated_at"] = summary["source_updated_at"]
     result_path = args.work_dir / "nightly-summary.json"
