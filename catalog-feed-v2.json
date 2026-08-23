@@ -1,5 +1,5 @@
 {
-  "checked_at": "2026-08-22T07:47:47Z",
+  "checked_at": "2026-08-23T07:49:14Z",
   "families": {
     "milo1": {
       "embedding": {
@@ -20,9 +20,9 @@
             "result_identifier": "scryfall_card",
             "recommended": true
           },
-          "current_version": 12,
+          "current_version": 13,
           "rows": 111131,
-          "source_updated_at": "2026-08-21T21:05:54.531Z",
+          "source_updated_at": "2026-08-22T21:05:38.265Z",
           "base": {
             "version": 10,
             "rows": 111131,
@@ -110,6 +110,30 @@
                   "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/scryfall-mtg/version/12/delta-from-11/records.jsonl.gz",
                   "size": 646,
                   "sha256": "69b780f98148c6296bd6e3bc1eed0e4e8c20287c6fffbefb853dd665fd449dd6"
+                }
+              }
+            },
+            "13": {
+              "from_version": 12,
+              "to_version": 13,
+              "rows": {
+                "added": 0,
+                "updated": 1,
+                "deleted": 0
+              },
+              "recognition_rows": 1,
+              "metadata_rows": 0,
+              "source_updated_at": "2026-08-22T21:05:38.265Z",
+              "assets": {
+                "embeddings": {
+                  "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/scryfall-mtg/version/13/delta-from-12/embeddings.f16.gz",
+                  "size": 279,
+                  "sha256": "1327803dc3b225a1af81ec3d9b6f01ebc052a5b5b0772d3dd7fda71bfd2d8eee"
+                },
+                "records": {
+                  "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/scryfall-mtg/version/13/delta-from-12/records.jsonl.gz",
+                  "size": 194,
+                  "sha256": "dce16b600510476c26aa1090576077e7c9553c90918d290b11b52ba55313069c"
                 }
               }
             }
@@ -905,9 +929,9 @@
             "result_identifier": "tcgplayer_product",
             "recommended": true
           },
-          "current_version": 12,
+          "current_version": 13,
           "rows": 114620,
-          "source_updated_at": "2026-08-21T20:05:51Z",
+          "source_updated_at": "2026-08-22T20:05:43Z",
           "base": {
             "version": 10,
             "rows": 114614,
@@ -995,6 +1019,30 @@
                   "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/tcgplayer-mtg/version/12/delta-from-11/records.jsonl.gz",
                   "size": 3523,
                   "sha256": "62c697332724819fd4468b386de842f364ee27c9a0ddc58c56c6b79c7d026f47"
+                }
+              }
+            },
+            "13": {
+              "from_version": 12,
+              "to_version": 13,
+              "rows": {
+                "added": 0,
+                "updated": 43,
+                "deleted": 0
+              },
+              "recognition_rows": 43,
+              "metadata_rows": 0,
+              "source_updated_at": "2026-08-22T20:05:43Z",
+              "assets": {
+                "embeddings": {
+                  "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/tcgplayer-mtg/version/13/delta-from-12/embeddings.f16.gz",
+                  "size": 10167,
+                  "sha256": "4c572804a5c9ac8b6ec65f798e95309f5a0005f6be3b9a9a38981588f5aaa7fb"
+                },
+                "records": {
+                  "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/tcgplayer-mtg/version/13/delta-from-12/records.jsonl.gz",
+                  "size": 1199,
+                  "sha256": "fd3c613f799d3b7eb6df171da1b907313148281041f54be0e535ede349dfd6e4"
                 }
               }
             }
@@ -1163,23 +1211,23 @@
             "result_identifier": "tcgplayer_product",
             "recommended": true
           },
-          "current_version": 9,
+          "current_version": 10,
           "rows": 26993,
-          "source_updated_at": "2026-08-21T20:05:51Z",
+          "source_updated_at": "2026-08-22T20:05:43Z",
           "base": {
-            "version": 0,
-            "rows": 26969,
-            "source_updated_at": "2026-07-24T20:11:00Z",
+            "version": 10,
+            "rows": 26993,
+            "source_updated_at": "2026-08-22T20:05:43Z",
             "assets": {
               "embeddings": {
-                "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/tcgplayer-pokemon/version/0/base/embeddings.f16.gz",
-                "size": 6330493,
-                "sha256": "796119673161a6f0e940d6cf901749aca142d6f97bee34399d717f09c07a97d4"
+                "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/tcgplayer-pokemon/version/10/base/embeddings.f16.gz",
+                "size": 6336575,
+                "sha256": "cc9c203844cb487bf864164b664c54233f60326cdc7e3a720f4465135fec0eb4"
               },
               "records": {
-                "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/tcgplayer-pokemon/version/0/base/records.jsonl.gz",
-                "size": 428060,
-                "sha256": "8e0f1f70c8ca15c3af45cfefaea34d63269204a5ce7ff96b1a7b074c5072ff2e"
+                "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/tcgplayer-pokemon/version/10/base/records.jsonl.gz",
+                "size": 428552,
+                "sha256": "2ee01a27a3d13b52b17aa2cd73ced851a88895e81c8fe12748aa4d119cc62f81"
               }
             }
           },
@@ -1397,6 +1445,30 @@
                   "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/tcgplayer-pokemon/version/9/delta-from-8/records.jsonl.gz",
                   "size": 827,
                   "sha256": "acdb9fd391c2fa958eb4932d0961bbe92be99c49bad23399176651e7bcb32fce"
+                }
+              }
+            },
+            "10": {
+              "from_version": 9,
+              "to_version": 10,
+              "rows": {
+                "added": 0,
+                "updated": 29,
+                "deleted": 0
+              },
+              "recognition_rows": 29,
+              "metadata_rows": 0,
+              "source_updated_at": "2026-08-22T20:05:43Z",
+              "assets": {
+                "embeddings": {
+                  "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/tcgplayer-pokemon/version/10/delta-from-9/embeddings.f16.gz",
+                  "size": 6872,
+                  "sha256": "453336376c22faa2f4aef889afcb55144e7518e93b41ffccf2827017cb454176"
+                },
+                "records": {
+                  "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/tcgplayer-pokemon/version/10/delta-from-9/records.jsonl.gz",
+                  "size": 626,
+                  "sha256": "564d48f0f2890ba436ac407a475116e91f1952d211d1d0c05d21b7c0533ecbc0"
                 }
               }
             }
@@ -1851,23 +1923,23 @@
             "result_identifier": "tcgplayer_product",
             "recommended": true
           },
-          "current_version": 9,
+          "current_version": 10,
           "rows": 44389,
-          "source_updated_at": "2026-08-21T20:05:51Z",
+          "source_updated_at": "2026-08-22T20:05:43Z",
           "base": {
-            "version": 0,
-            "rows": 44226,
-            "source_updated_at": "2026-07-24T20:11:00Z",
+            "version": 10,
+            "rows": 44389,
+            "source_updated_at": "2026-08-22T20:05:43Z",
             "assets": {
               "embeddings": {
-                "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/tcgplayer-yugioh/version/0/base/embeddings.f16.gz",
-                "size": 10415524,
-                "sha256": "776420aaea84b6efed091a6a6069e2bb065680c2edb43b06187d7fc30ef867af"
+                "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/tcgplayer-yugioh/version/10/base/embeddings.f16.gz",
+                "size": 10454276,
+                "sha256": "c6f0170f92bcaa33d5f50fe9ff8b8a0b032dd25d3ec5a0487b3bc8b5aa93abd3"
               },
               "records": {
-                "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/tcgplayer-yugioh/version/0/base/records.jsonl.gz",
-                "size": 798718,
-                "sha256": "e34b2179bf9e90745398f590cddc318e8b60b1ac211debf9d2da4f7fa3adf0cf"
+                "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/tcgplayer-yugioh/version/10/base/records.jsonl.gz",
+                "size": 801523,
+                "sha256": "43ef1bdea2e44b7b986afc23c744d542d9dbd041c64468d60ca63265573b2c74"
               }
             }
           },
@@ -2085,6 +2157,30 @@
                   "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/tcgplayer-yugioh/version/9/delta-from-8/records.jsonl.gz",
                   "size": 871,
                   "sha256": "7caa62c2a2bb8a400f6a77eb639e5b4fe459f162dd3cd2cb9bd947c304c70f5d"
+                }
+              }
+            },
+            "10": {
+              "from_version": 9,
+              "to_version": 10,
+              "rows": {
+                "added": 0,
+                "updated": 1,
+                "deleted": 0
+              },
+              "recognition_rows": 1,
+              "metadata_rows": 0,
+              "source_updated_at": "2026-08-22T20:05:43Z",
+              "assets": {
+                "embeddings": {
+                  "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/tcgplayer-yugioh/version/10/delta-from-9/embeddings.f16.gz",
+                  "size": 279,
+                  "sha256": "c734a609d73537b30884071898cc110277fa9ca46ca3aeacbe665bc010abd21c"
+                },
+                "records": {
+                  "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/tcgplayer-yugioh/version/10/delta-from-9/records.jsonl.gz",
+                  "size": 184,
+                  "sha256": "ea1ab0bcddfcc223c6e2e6fa55b2db12941c629d064fb48d440f8dcf672a5411"
                 }
               }
             }
