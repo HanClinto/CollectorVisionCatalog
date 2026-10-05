@@ -338,6 +338,52 @@ def test_scryfall_cache_resolves_sharded_face_and_revision(tmp_path: Path) -> No
         image.close()
 
 
+def test_scryfall_cache_uses_legacy_png_during_webp_migration(tmp_path: Path) -> None:
+    images_root = tmp_path / "scryfall" / "images"
+    png_path = images_root / "png" / "front" / "c" / "a" / f"{CARD_ID}.png"
+    png_path.parent.mkdir(parents=True)
+    Image.new("RGB", (2, 2), (255, 0, 0)).save(png_path)
+    row = make_row(
+        f"https://cards.scryfall.io/display/front/c/a/{CARD_ID}.webp?999"
+    )
+    previous_url = f"https://cards.scryfall.io/png/front/c/a/{CARD_ID}.png?123"
+
+    cache = updater.ScryfallImageCache(
+        tmp_path,
+        [row],
+        previous_image_urls={row.key: previous_url},
+    )
+
+    assert cache.path_for_row(row) == (
+        images_root / "display" / "front" / "c" / "a" / f"{CARD_ID}.webp"
+    )
+    assert cache.is_current(row)
+    image = cache(row.image_url)
+    try:
+        assert image.getpixel((0, 0)) == (255, 0, 0)
+    finally:
+        image.close()
+
+
+def test_scryfall_cache_refreshes_after_webp_revision_changes(tmp_path: Path) -> None:
+    images_root = tmp_path / "scryfall" / "images"
+    png_path = images_root / "png" / "front" / "c" / "a" / f"{CARD_ID}.png"
+    png_path.parent.mkdir(parents=True)
+    Image.new("RGB", (2, 2)).save(png_path)
+    row = make_row(
+        f"https://cards.scryfall.io/display/front/c/a/{CARD_ID}.webp?999"
+    )
+    previous_url = f"https://cards.scryfall.io/display/front/c/a/{CARD_ID}.webp?123"
+
+    cache = updater.ScryfallImageCache(
+        tmp_path,
+        [row],
+        previous_image_urls={row.key: previous_url},
+    )
+
+    assert not cache.is_current(row)
+
+
 def test_tcgplayer_cache_resolves_sharded_product_image(tmp_path: Path) -> None:
     images_root = tmp_path / "tcgplayer" / "images" / "product"
     path = images_root / "1" / "2" / "12345.jpg"
@@ -368,10 +414,9 @@ def test_tcgplayer_cache_resolves_sharded_product_image(tmp_path: Path) -> None:
 def test_image_caches_create_canonical_roots(tmp_path: Path) -> None:
     scryfall_root = tmp_path / "new-scryfall-cache"
     assert updater._resolve_scryfall_images_root(scryfall_root) == (
-        scryfall_root / "scryfall" / "images" / "png"
+        scryfall_root / "scryfall" / "images"
     )
-    assert (scryfall_root / "scryfall" / "images" / "png" / "front").is_dir()
-    assert (scryfall_root / "scryfall" / "images" / "png" / "back").is_dir()
+    assert (scryfall_root / "scryfall" / "images").is_dir()
 
     tcgplayer_root = tmp_path / "new-tcgplayer-cache"
     assert updater._resolve_tcgplayer_images_root(tcgplayer_root) == (

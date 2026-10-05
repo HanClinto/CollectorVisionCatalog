@@ -8,7 +8,7 @@ from uuid import UUID
 
 from ..artifacts import RecognitionRow, ValidationError
 
-_IMAGE_PREFERENCE = ("png", "large", "normal")
+_IMAGE_PREFERENCE = ("display", "png", "large", "normal")
 
 
 def normalize_scryfall_card(card: Mapping[str, Any]) -> list[RecognitionRow]:

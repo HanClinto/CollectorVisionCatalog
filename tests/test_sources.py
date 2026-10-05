@@ -52,6 +52,7 @@ def test_normalize_scryfall_card_faces_and_identifiers() -> None:
                 "cmc": 2.0,
                 "colors": ["W"],
                 "image_uris": {
+                    "display": "https://img/front-display.webp",
                     "normal": "https://img/front-normal.png",
                     "png": "https://img/front.png",
                 },
@@ -75,7 +76,7 @@ def test_normalize_scryfall_card_faces_and_identifiers() -> None:
     assert rows[1].face_index == 1
     assert "face_index" not in rows[0].minimal_record()
     assert rows[1].minimal_record()["face_index"] == 1
-    assert rows[0].image_url == "https://img/front.png"
+    assert rows[0].image_url == "https://img/front-display.webp"
     assert rows[1].image_url == "https://img/back-large.png"
     assert rows[0].identifiers == {
         "scryfall_oracle": ORACLE_ID,

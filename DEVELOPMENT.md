@@ -84,6 +84,11 @@ TCGplayer compares current source fingerprints with the prior catalog state
 under `data-cache/current-publication/builds`; override that location with
 `--previous-builds-root`.
 
+Scryfall prefers `display` WebP URLs for new downloads. Existing PNG cache
+entries remain valid during the one-time format migration even though Scryfall
+reset the WebP URL revisions; once the rebuilt state records a display URL,
+later display revision changes download a fresh WebP.
+
 Published Scryfall source revisions can be replayed from `.json`, `.json.gz`,
 `.jsonl`, or `.jsonl.gz` archives:
 

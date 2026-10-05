@@ -29,6 +29,7 @@ from collectorvision_catalog import (
     SourceRevision,
     ValidationError,
     build_catalog,
+    catalog_row_key,
     load_catalog_build,
     manifest_filename_for_catalog,
     max_source_updated_at,
@@ -661,7 +662,16 @@ def build_enabled_catalogs(
             effective_image_loader = image_loader
         elif cache_root is not None:
             if source_type == "scryfall":
-                effective_image_loader = ScryfallImageCache(cache_root, rows)
+                previous_image_urls = (
+                    {}
+                    if previous is None
+                    else {row.key: row.image_url for row in previous.rows}
+                )
+                effective_image_loader = ScryfallImageCache(
+                    cache_root,
+                    rows,
+                    previous_image_urls=previous_image_urls,
+                )
             elif source_type == "tcgcsv":
                 previous_fingerprints = (
                     {}
@@ -893,40 +903,78 @@ def refresh_tcgplayer_images(
 
 
 class ScryfallImageCache:
-    def __init__(self, cache_root: Path, rows: Iterable[RecognitionRow]) -> None:
+    def __init__(
+        self,
+        cache_root: Path,
+        rows: Iterable[RecognitionRow],
+        *,
+        previous_image_urls: Mapping[str, str] | None = None,
+    ) -> None:
         self.images_root = _resolve_scryfall_images_root(cache_root)
-        paths_by_url: dict[str, list[Path]] = defaultdict(list)
-        revisions: dict[str, int] = {}
+        previous_image_urls = previous_image_urls or {}
+        entries_by_url: dict[str, list[tuple[Path, Path | None, int]]] = defaultdict(list)
         for row in rows:
-            paths_by_url[row.image_url].append(self.path_for_row(row))
-            revisions[row.image_url] = scryfall_image_revision(row.image_url)
+            current_path = self.path_for_row(row)
+            legacy_png_path = self._legacy_png_path(row)
+            previous_url = previous_image_urls.get(row.key)
+            allow_legacy_png = (
+                current_path.suffix == ".webp"
+                and (
+                    previous_url is None
+                    or previous_url == row.image_url
+                    or _scryfall_image_format(previous_url) == ("png", ".png")
+                )
+            )
+            entries_by_url[row.image_url].append(
+                (
+                    current_path,
+                    legacy_png_path if allow_legacy_png else None,
+                    scryfall_image_revision(row.image_url),
+                )
+            )
         self._entries = {
-            image_url: (tuple(paths), revisions[image_url])
-            for image_url, paths in paths_by_url.items()
+            image_url: tuple(entries) for image_url, entries in entries_by_url.items()
         }
 
     def path_for_row(self, row: RecognitionRow) -> Path:
         face = "back" if row.face_index > 0 else "front"
         card_id = _canonical_uuid(row.id, row.key)
-        return self.images_root / face / card_id[0] / card_id[1] / f"{card_id}.png"
+        image_format, suffix = _scryfall_image_format(row.image_url)
+        return (
+            self.images_root
+            / image_format
+            / face
+            / card_id[0]
+            / card_id[1]
+            / f"{card_id}{suffix}"
+        )
+
+    def _legacy_png_path(self, row: RecognitionRow) -> Path:
+        face = "back" if row.face_index > 0 else "front"
+        card_id = _canonical_uuid(row.id, row.key)
+        return self.images_root / "png" / face / card_id[0] / card_id[1] / f"{card_id}.png"
 
     def is_current(self, row: RecognitionRow) -> bool:
-        paths, revision = self._entries[row.image_url]
         return any(
-            path.is_file() and (revision == 0 or abs(path.stat().st_mtime - revision) < 1.0)
-            for path in paths
+            self._cached_scryfall_path(current_path, legacy_png_path, revision) is not None
+            for current_path, legacy_png_path, revision in self._entries[row.image_url]
         )
 
     def __call__(self, image_url: str) -> Image.Image:
         try:
-            paths, revision = self._entries[image_url]
+            entries = self._entries[image_url]
         except KeyError as error:
             raise ValidationError(
                 f"image URL is not part of this Scryfall build: {image_url}"
             ) from error
-        for path in paths:
-            if path.is_file() and (revision == 0 or abs(path.stat().st_mtime - revision) < 1.0):
-                return _open_rgb_image(path)
+        for current_path, legacy_png_path, revision in entries:
+            cached_path = self._cached_scryfall_path(
+                current_path,
+                legacy_png_path,
+                revision,
+            )
+            if cached_path is not None:
+                return _open_rgb_image(cached_path)
 
         request = Request(
             image_url,
@@ -937,7 +985,7 @@ class ScryfallImageCache:
         with Image.open(io.BytesIO(payload)) as image:
             image.verify()
 
-        path = paths[0]
+        path, _, revision = entries[0]
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_name(f".{path.name}.tmp-{os.getpid()}")
         try:
@@ -948,6 +996,20 @@ class ScryfallImageCache:
         finally:
             temporary.unlink(missing_ok=True)
         return _open_rgb_image(path)
+
+    @staticmethod
+    def _cached_scryfall_path(
+        current_path: Path,
+        legacy_png_path: Path | None,
+        revision: int,
+    ) -> Path | None:
+        if current_path.is_file() and (
+            revision == 0 or abs(current_path.stat().st_mtime - revision) < 1.0
+        ):
+            return current_path
+        if legacy_png_path is not None and legacy_png_path.is_file():
+            return legacy_png_path
+        return None
 
 
 def _download_tcgplayer_image(image_url: str, attempts: int = 6) -> bytes:
@@ -1057,20 +1119,40 @@ def scryfall_image_revision(image_url: str) -> int:
     return int(query) if query.isdecimal() else 0
 
 
+def _scryfall_image_format(image_url: str) -> tuple[str, str]:
+    path = Path(urlparse(image_url).path)
+    parts = path.parts
+    if len(parts) < 5:
+        raise ValidationError(f"unsupported Scryfall image URL: {image_url}")
+    image_format = parts[-5]
+    suffix = path.suffix.lower()
+    expected_suffixes = {
+        "display": ".webp",
+        "grid": ".webp",
+        "png": ".png",
+        "large": ".jpg",
+        "normal": ".jpg",
+    }
+    if expected_suffixes.get(image_format) != suffix:
+        raise ValidationError(f"unsupported Scryfall image URL: {image_url}")
+    return image_format, suffix
+
+
 def _resolve_scryfall_images_root(cache_root: Path) -> Path:
     root = cache_root.expanduser().resolve()
-    canonical = root / "scryfall" / "images" / "png"
+    canonical = root / "scryfall" / "images"
     candidates = [
         canonical,
-        root / "images" / "png",
-        root / "png",
+        root / "images",
         root,
     ]
     for candidate in candidates:
-        if (candidate / "front").is_dir() and (candidate / "back").is_dir():
+        if any(
+            (candidate / image_format).is_dir()
+            for image_format in ("display", "grid", "png", "large", "normal")
+        ):
             return candidate
-    (canonical / "front").mkdir(parents=True, exist_ok=True)
-    (canonical / "back").mkdir(parents=True, exist_ok=True)
+    canonical.mkdir(parents=True, exist_ok=True)
     return canonical
 
 
@@ -1152,6 +1234,62 @@ def _count_changed_image_rows(
     current_keys = {row.key for row in rows}
     removed = len(set(previous_fingerprints).difference(current_keys))
     return changed_or_added + removed
+
+
+def load_previous_image_state(
+    builds_root: Path,
+    *,
+    descriptor: Mapping[str, Any],
+) -> dict[str, tuple[str, str]]:
+    candidates: list[tuple[Path, Mapping[str, Any]]] = []
+    for manifest_path in builds_root.rglob("*.manifest.json"):
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if payload.get("descriptor") != descriptor:
+            continue
+        assets = payload.get("assets")
+        if not isinstance(assets, Mapping):
+            continue
+        identifiers = assets.get("identifiers")
+        states = assets.get("state_rows")
+        if not isinstance(identifiers, Mapping) or not isinstance(states, Mapping):
+            continue
+        identifiers_path = manifest_path.parent / str(identifiers.get("filename", ""))
+        states_path = manifest_path.parent / str(states.get("filename", ""))
+        if identifiers_path.is_file() and states_path.is_file():
+            candidates.append((manifest_path, payload))
+    if len(candidates) != 1:
+        raise ValidationError(
+            f"expected one previous build for descriptor {dict(descriptor)!r}, "
+            f"found {len(candidates)} under {builds_root}"
+        )
+    manifest_path, payload = candidates[0]
+    assets = payload["assets"]
+    identifiers_path = manifest_path.parent / assets["identifiers"]["filename"]
+    states_path = manifest_path.parent / assets["state_rows"]["filename"]
+    provider = str(descriptor["source"])
+    state_by_key: dict[str, tuple[str, str]] = {}
+    with gzip.open(identifiers_path, "rt", encoding="utf-8") as identifiers_file, gzip.open(
+        states_path,
+        "rt",
+        encoding="utf-8",
+    ) as states_file:
+        for identifier_line, state_line in zip(
+            identifiers_file,
+            states_file,
+            strict=True,
+        ):
+            identifier = json.loads(identifier_line)
+            state = json.loads(state_line)
+            key = catalog_row_key(
+                provider,
+                str(identifier["id"]),
+                int(identifier.get("face_index", 0)),
+            )
+            state_by_key[key] = (
+                str(state["image_url"]),
+                str(state["image_fingerprint"]),
+            )
+    return state_by_key
 
 
 def _required_text(value: Any, name: str) -> str:

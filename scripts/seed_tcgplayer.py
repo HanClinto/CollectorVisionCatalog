@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import gzip
 import json
 import runpy
 from collections.abc import Iterable, Mapping, Sequence
@@ -33,6 +32,7 @@ DEFAULT_CACHE_ROOT = _UPDATER["DEFAULT_CACHE_ROOT"]
 create_embedder = _UPDATER["create_embedder"]
 fetch_tcgcsv_snapshots = _UPDATER["fetch_tcgcsv_snapshots"]
 load_config = _UPDATER["load_config"]
+load_previous_image_state = _UPDATER["load_previous_image_state"]
 
 LEGACY_CATALOG_KEYS = {
     "milo1/tcgplayer/mtg": "tcgplayer-mtg",
@@ -133,59 +133,6 @@ def select_cache_refresh_rows(
         if not image_cache.is_cached(row)
         or previous_fingerprints.get(row.key) != row.image_fingerprint
     )
-
-
-def load_previous_fingerprints(
-    builds_root: Path,
-    *,
-    descriptor: Mapping[str, Any],
-) -> dict[str, str]:
-    candidates: list[tuple[Path, Mapping[str, Any]]] = []
-    for manifest_path in builds_root.rglob("*.manifest.json"):
-        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
-        if payload.get("descriptor") != descriptor:
-            continue
-        assets = payload.get("assets")
-        if not isinstance(assets, Mapping):
-            continue
-        identifiers = assets.get("identifiers")
-        states = assets.get("state_rows")
-        if not isinstance(identifiers, Mapping) or not isinstance(states, Mapping):
-            continue
-        identifiers_path = manifest_path.parent / str(identifiers.get("filename", ""))
-        states_path = manifest_path.parent / str(states.get("filename", ""))
-        if identifiers_path.is_file() and states_path.is_file():
-            candidates.append((manifest_path, payload))
-    if len(candidates) != 1:
-        raise ValidationError(
-            f"expected one previous build for descriptor {dict(descriptor)!r}, "
-            f"found {len(candidates)} under {builds_root}"
-        )
-    manifest_path, payload = candidates[0]
-    assets = payload["assets"]
-    identifiers_path = manifest_path.parent / assets["identifiers"]["filename"]
-    states_path = manifest_path.parent / assets["state_rows"]["filename"]
-    provider = str(descriptor["source"])
-    fingerprints: dict[str, str] = {}
-    with gzip.open(identifiers_path, "rt", encoding="utf-8") as identifiers_file, gzip.open(
-        states_path,
-        "rt",
-        encoding="utf-8",
-    ) as states_file:
-        for identifier_line, state_line in zip(
-            identifiers_file,
-            states_file,
-            strict=True,
-        ):
-            identifier = json.loads(identifier_line)
-            state = json.loads(state_line)
-            key = catalog_row_key(
-                provider,
-                str(identifier["id"]),
-                int(identifier.get("face_index", 0)),
-            )
-            fingerprints[key] = str(state["image_fingerprint"])
-    return fingerprints
 
 
 def refresh_inference_images(
@@ -303,14 +250,17 @@ def build_seed(
                 raise ValidationError(
                     "previous_builds_root is required when refreshing the TCGplayer cache"
                 )
-            previous_fingerprints = load_previous_fingerprints(
+            previous_state = load_previous_image_state(
                 previous_builds_root,
                 descriptor=config.descriptor.to_dict(),
             )
             refresh_rows_by_catalog[catalog_key] = select_cache_refresh_rows(
                 available_rows,
                 image_cache,
-                previous_fingerprints,
+                {
+                    key: image_fingerprint
+                    for key, (_, image_fingerprint) in previous_state.items()
+                },
             )
         model_ids.add(config.embedding_model)
         print(json.dumps(plan.summary(), indent=2, sort_keys=True), flush=True)

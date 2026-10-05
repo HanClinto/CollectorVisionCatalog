@@ -32,6 +32,7 @@ DEFAULT_CACHE_ROOT = _UPDATER["DEFAULT_CACHE_ROOT"]
 create_embedder = _UPDATER["create_embedder"]
 fetch_scryfall_snapshot = _UPDATER["fetch_scryfall_snapshot"]
 load_config = _UPDATER["load_config"]
+load_previous_image_state = _UPDATER["load_previous_image_state"]
 scryfall_source_override = _UPDATER["_scryfall_source_override"]
 
 
@@ -139,6 +140,7 @@ def build_seed(
     refresh_workers: int,
     build: bool,
     refresh_cache: bool = False,
+    previous_builds_root: Path | None = None,
     expected_revision: SourceRevision | None = None,
     source_override: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -160,7 +162,20 @@ def build_seed(
         rules=load_quality_rules(quality_overrides_path),
     )
     rows = list(quality_result.rows)
-    image_cache = ScryfallImageCache(cache_root, rows)
+    previous_image_urls: dict[str, str] = {}
+    if previous_builds_root is not None:
+        previous_state = load_previous_image_state(
+            previous_builds_root,
+            descriptor=config.descriptor.to_dict(),
+        )
+        previous_image_urls = {
+            key: image_url for key, (image_url, _) in previous_state.items()
+        }
+    image_cache = ScryfallImageCache(
+        cache_root,
+        rows,
+        previous_image_urls=previous_image_urls,
+    )
     legacy_embeddings = (
         {}
         if refresh_cache or legacy_catalog is None
@@ -306,6 +321,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--version", required=True)
     parser.add_argument("--expected-source-revisions", type=Path)
     parser.add_argument(
+        "--previous-builds-root",
+        type=Path,
+        default=Path("data-cache/current-publication/builds"),
+        help="Build tree containing prior image URLs for cache migration",
+    )
+    parser.add_argument(
         "--scryfall-bulk-uri",
         help="Archived Scryfall .json[.gz] or .jsonl[.gz] file path or URL",
     )
@@ -363,6 +384,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         refresh_workers=args.refresh_workers,
         build=args.build,
         refresh_cache=args.refresh_cache,
+        previous_builds_root=args.previous_builds_root,
         expected_revision=expected_revision,
         source_override=source_override,
     )
