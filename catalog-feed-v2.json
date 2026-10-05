@@ -1,5 +1,5 @@
 {
-  "checked_at": "2026-10-04T13:15:12Z",
+  "checked_at": "2026-10-05T16:06:38Z",
   "families": {
     "milo1": {
       "embedding": {
@@ -20,9 +20,9 @@
             "result_identifier": "scryfall_card",
             "recommended": true
           },
-          "current_version": 53,
-          "rows": 113114,
-          "source_updated_at": "2026-10-04T09:05:31.532Z",
+          "current_version": 54,
+          "rows": 113231,
+          "source_updated_at": "2026-10-05T09:05:54.625Z",
           "base": {
             "version": 50,
             "rows": 113111,
@@ -41,30 +41,6 @@
             }
           },
           "updates": {
-            "24": {
-              "from_version": 23,
-              "to_version": 24,
-              "rows": {
-                "added": 4,
-                "updated": 8,
-                "deleted": 0
-              },
-              "recognition_rows": 12,
-              "metadata_rows": 4,
-              "source_updated_at": "2026-09-04T09:05:32.308Z",
-              "assets": {
-                "embeddings": {
-                  "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/scryfall-mtg/version/24/delta-from-23/embeddings.f16.gz",
-                  "size": 2903,
-                  "sha256": "bc2695435e3cddfd267948b278073d03adfaf2dd4153220787aea26323d6def2"
-                },
-                "records": {
-                  "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/scryfall-mtg/version/24/delta-from-23/records.jsonl.gz",
-                  "size": 1193,
-                  "sha256": "ce8476c7b456e2172a4cbf173f875b4eba292651b95c78db72bc36af8ba13beb"
-                }
-              }
-            },
             "25": {
               "from_version": 24,
               "to_version": 25,
@@ -758,6 +734,30 @@
                   "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/scryfall-mtg/version/53/delta-from-52/records.jsonl.gz",
                   "size": 626,
                   "sha256": "8fbb2ddea3b4635c5e1e4d88e24e4174789aadc9b11c3e5d29862d89a5364967"
+                }
+              }
+            },
+            "54": {
+              "from_version": 53,
+              "to_version": 54,
+              "rows": {
+                "added": 117,
+                "updated": 30,
+                "deleted": 0
+              },
+              "recognition_rows": 147,
+              "metadata_rows": 135,
+              "source_updated_at": "2026-10-05T09:05:54.625Z",
+              "assets": {
+                "embeddings": {
+                  "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/scryfall-mtg/version/54/delta-from-53/embeddings.f16.gz",
+                  "size": 32938,
+                  "sha256": "2fca73269e72e6ece52cd314c06ae385e9fd39134439e24aa3ecefb78e941204"
+                },
+                "records": {
+                  "url": "https://hanclinto.github.io/CollectorVisionCatalog/catalog-v2/scryfall-mtg/version/54/delta-from-53/records.jsonl.gz",
+                  "size": 10480,
+                  "sha256": "82561e371d32639553453e10968bc518848377555667cd0505d9094491f639c2"
                 }
               }
             }
