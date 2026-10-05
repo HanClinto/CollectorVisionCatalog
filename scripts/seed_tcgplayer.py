@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import argparse
+import gzip
 import json
 import runpy
 from collections.abc import Iterable, Mapping, Sequence
@@ -121,6 +122,72 @@ def create_seed_plan(
     )
 
 
+def select_cache_refresh_rows(
+    rows: Sequence[RecognitionRow],
+    image_cache: Any,
+    previous_fingerprints: Mapping[str, str],
+) -> tuple[RecognitionRow, ...]:
+    return tuple(
+        row
+        for row in rows
+        if not image_cache.is_cached(row)
+        or previous_fingerprints.get(row.key) != row.image_fingerprint
+    )
+
+
+def load_previous_fingerprints(
+    builds_root: Path,
+    *,
+    descriptor: Mapping[str, Any],
+) -> dict[str, str]:
+    candidates: list[tuple[Path, Mapping[str, Any]]] = []
+    for manifest_path in builds_root.rglob("*.manifest.json"):
+        payload = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if payload.get("descriptor") != descriptor:
+            continue
+        assets = payload.get("assets")
+        if not isinstance(assets, Mapping):
+            continue
+        identifiers = assets.get("identifiers")
+        states = assets.get("state_rows")
+        if not isinstance(identifiers, Mapping) or not isinstance(states, Mapping):
+            continue
+        identifiers_path = manifest_path.parent / str(identifiers.get("filename", ""))
+        states_path = manifest_path.parent / str(states.get("filename", ""))
+        if identifiers_path.is_file() and states_path.is_file():
+            candidates.append((manifest_path, payload))
+    if len(candidates) != 1:
+        raise ValidationError(
+            f"expected one previous build for descriptor {dict(descriptor)!r}, "
+            f"found {len(candidates)} under {builds_root}"
+        )
+    manifest_path, payload = candidates[0]
+    assets = payload["assets"]
+    identifiers_path = manifest_path.parent / assets["identifiers"]["filename"]
+    states_path = manifest_path.parent / assets["state_rows"]["filename"]
+    provider = str(descriptor["source"])
+    fingerprints: dict[str, str] = {}
+    with gzip.open(identifiers_path, "rt", encoding="utf-8") as identifiers_file, gzip.open(
+        states_path,
+        "rt",
+        encoding="utf-8",
+    ) as states_file:
+        for identifier_line, state_line in zip(
+            identifiers_file,
+            states_file,
+            strict=True,
+        ):
+            identifier = json.loads(identifier_line)
+            state = json.loads(state_line)
+            key = catalog_row_key(
+                provider,
+                str(identifier["id"]),
+                int(identifier.get("face_index", 0)),
+            )
+            fingerprints[key] = str(state["image_fingerprint"])
+    return fingerprints
+
+
 def refresh_inference_images(
     rows: Iterable[RecognitionRow],
     image_cache: Any,
@@ -171,6 +238,7 @@ def build_seed(
     refresh_workers: int,
     build: bool,
     refresh_cache: bool = False,
+    previous_builds_root: Path | None = None,
     catalog_keys: Sequence[str] | None = None,
     expected_revision: SourceRevision | None = None,
 ) -> dict[str, Any]:
@@ -192,6 +260,7 @@ def build_seed(
         raise ValidationError("--legacy-dir is required when seeding legacy catalogs")
 
     plans: list[TCGplayerSeedPlan] = []
+    refresh_rows_by_catalog: dict[str, tuple[RecognitionRow, ...]] = {}
     model_ids: set[str] = set()
     quality_reports: dict[str, Any] = {}
     quality_rules = load_quality_rules(quality_overrides_path)
@@ -229,6 +298,20 @@ def build_seed(
         available_rows = [row for row in rows if row.key not in known_unavailable]
         plan = create_seed_plan(catalog_key, available_rows, legacy_embeddings, image_cache)
         plans.append(plan)
+        if refresh_cache:
+            if previous_builds_root is None:
+                raise ValidationError(
+                    "previous_builds_root is required when refreshing the TCGplayer cache"
+                )
+            previous_fingerprints = load_previous_fingerprints(
+                previous_builds_root,
+                descriptor=config.descriptor.to_dict(),
+            )
+            refresh_rows_by_catalog[catalog_key] = select_cache_refresh_rows(
+                available_rows,
+                image_cache,
+                previous_fingerprints,
+            )
         model_ids.add(config.embedding_model)
         print(json.dumps(plan.summary(), indent=2, sort_keys=True), flush=True)
 
@@ -245,11 +328,18 @@ def build_seed(
             report["excluded_rows"] for report in quality_reports.values()
         ),
     }
+    if refresh_cache:
+        refresh_downloads = sum(len(rows) for rows in refresh_rows_by_catalog.values())
+        summary["downloads_required"] = refresh_downloads
+        for catalog_summary in summary["catalogs"]:
+            catalog_summary["downloads_required"] = len(
+                refresh_rows_by_catalog[catalog_summary["catalog_key"]]
+            )
     print(json.dumps(summary, indent=2, sort_keys=True), flush=True)
     if not build and not refresh_cache:
         return summary
     refresh_downloads = (
-        sum(len(plan.rows) for plan in plans) if refresh_cache else total_downloads
+        summary["downloads_required"] if refresh_cache else total_downloads
     )
     if refresh_downloads > max_downloads:
         raise ValidationError(
@@ -259,14 +349,15 @@ def build_seed(
     if refresh_cache:
         unavailable_total = 0
         for plan in plans:
+            refresh_rows = refresh_rows_by_catalog[plan.catalog_key]
             refreshing_cache = TCGplayerImageCache(
                 cache_root,
                 plan.rows,
-                refresh_urls=(row.image_url for row in plan.rows),
+                refresh_urls=(row.image_url for row in refresh_rows),
             )
             unavailable_total += len(
                 refresh_inference_images(
-                    plan.rows,
+                    refresh_rows,
                     refreshing_cache,
                     workers=refresh_workers,
                     catalog_key=plan.catalog_key,
@@ -371,6 +462,12 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=Path("tcgplayer-release"))
     parser.add_argument("--version", required=True)
     parser.add_argument("--expected-source-revisions", type=Path)
+    parser.add_argument(
+        "--previous-builds-root",
+        type=Path,
+        default=Path("data-cache/current-publication/builds"),
+        help="Build tree containing prior state fingerprints for cache refresh",
+    )
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--refresh-workers", type=int, default=4)
     parser.add_argument(
@@ -388,7 +485,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     action.add_argument(
         "--refresh-cache",
         action="store_true",
-        help="Re-download every current source image without building embeddings",
+        help="Download missing or source-modified images without building embeddings",
     )
     return parser.parse_args(argv)
 
@@ -424,6 +521,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         refresh_workers=args.refresh_workers,
         build=args.build,
         refresh_cache=args.refresh_cache,
+        previous_builds_root=args.previous_builds_root,
         catalog_keys=selected_keys,
         expected_revision=expected_revision,
     )

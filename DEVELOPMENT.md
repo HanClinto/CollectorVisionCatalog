@@ -79,9 +79,10 @@ COLLECTORVISION_CACHE_ROOT=/path/to/image-cache \
   --catalog milo1/tcgplayer/mtg
 ```
 
-Scryfall refreshes only missing or stale revisions. TCGplayer images are
-re-downloaded because its cache paths do not retain the source `modifiedOn`
-revision.
+Both refresh commands download only missing or source-modified images.
+TCGplayer compares current source fingerprints with the prior catalog state
+under `data-cache/current-publication/builds`; override that location with
+`--previous-builds-root`.
 
 Published Scryfall source revisions can be replayed from `.json`, `.json.gz`,
 `.jsonl`, or `.jsonl.gz` archives:

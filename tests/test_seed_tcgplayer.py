@@ -98,3 +98,26 @@ def test_cli_defaults_to_shared_cache_root_for_refresh() -> None:
     assert args.cache_root == Path("data-cache")
     assert args.refresh_cache is True
     assert args.build is False
+
+
+def test_cache_refresh_selects_missing_and_source_modified_rows() -> None:
+    unchanged = make_row("100", "same")
+    changed = make_row("200", "new")
+    missing = make_row("300", "same")
+
+    class Cache:
+        @staticmethod
+        def is_cached(row: RecognitionRow) -> bool:
+            return row.id != "300"
+
+    selected = seed.select_cache_refresh_rows(
+        [unchanged, changed, missing],
+        Cache(),
+        {
+            unchanged.key: unchanged.image_fingerprint,
+            changed.key: "fp-old",
+            missing.key: missing.image_fingerprint,
+        },
+    )
+
+    assert [row.key for row in selected] == [changed.key, missing.key]
