@@ -1315,10 +1315,7 @@ def _build_embeddings(
             pending_indexes.append(index)
     for start in range(0, len(pending_indexes), batch_size):
         batch_indexes = pending_indexes[start : start + batch_size]
-        images = [
-            _ensure_portrait(image_loader(rows[index].image_url))
-            for index in batch_indexes
-        ]
+        images = [image_loader(rows[index].image_url) for index in batch_indexes]
         try:
             payload = embedder(images)
         finally:
@@ -1347,14 +1344,6 @@ def _build_embeddings(
             f"{embeddings.shape} does not match ({len(rows)}, {expected_dim})"
         )
     return embeddings
-
-
-def _ensure_portrait(image: Image.Image) -> Image.Image:
-    if image.width <= image.height:
-        return image
-    portrait = image.transpose(Image.Transpose.ROTATE_90)
-    image.close()
-    return portrait
 
 
 def _validate_embedding_batch(

@@ -18,7 +18,6 @@ from conftest import (
 from conftest import (
     build_test_catalog as build_catalog,
 )
-from PIL import Image
 
 from collectorvision_catalog import (
     METADATA_UNSET,
@@ -776,39 +775,6 @@ def test_reembeds_when_image_fingerprint_changes(workspace: Path) -> None:
         previous.embeddings.astype(np.float32),
         build.embeddings.astype(np.float32),
     )
-
-
-def test_rotates_landscape_images_to_portrait_before_embedding(workspace: Path) -> None:
-    image = Image.new("RGB", (3, 2))
-    image.putpixel((0, 0), (255, 0, 0))
-    image.putpixel((2, 0), (0, 255, 0))
-    image.putpixel((0, 1), (0, 0, 255))
-    image.putpixel((2, 1), (255, 255, 0))
-
-    class OrientationEmbedder:
-        def __init__(self) -> None:
-            self.observed: tuple[tuple[int, int], tuple[int, int, int]] | None = None
-
-        def __call__(self, images: list[Image.Image]) -> np.ndarray:
-            observed = images[0]
-            self.observed = (
-                observed.size,
-                tuple(int(value) for value in observed.getpixel((0, 0))),
-            )
-            return np.array([[1.0, 0.0]], dtype=np.float32)
-
-    embedder = OrientationEmbedder()
-    build_catalog(
-        [make_row("landscape", "memory://landscape", "fp-landscape")],
-        embedder=embedder,
-        image_loader=lambda _: image,
-        output_dir=workspace / "landscape",
-        catalog_key=CATALOG_KEY,
-        version="v1",
-        embedding_model=EMBEDDING_MODEL,
-    )
-
-    assert embedder.observed == ((2, 3), (0, 255, 0))
 
 
 def test_apply_delta_roundtrip_with_add_delete_and_minimal_change(workspace: Path) -> None:

@@ -16,7 +16,7 @@
         "bulk_type": "default_cards",
         "paper_only": true
       },
-      "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
+      "embedding_model": "collectorvision@8b295ab80a997766afc00c640a616c1f2716df21:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
       "max_changed_rows": 5000,
       "enabled": true,
       "seed_required": true
@@ -25,7 +25,7 @@
       "key": "milo1/tcgplayer/mtg",
       "descriptor": {"game": "magic-the-gathering", "source": "tcgplayer", "profile": "printings", "description": "TCGplayer marketplace printing catalog.", "result_identifier": "tcgplayer_product", "recommended": true},
       "source": {"type": "tcgcsv", "category_id": 1},
-      "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
+      "embedding_model": "collectorvision@8b295ab80a997766afc00c640a616c1f2716df21:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
       "enabled": true,
       "seed_required": true
     },
@@ -33,7 +33,7 @@
       "key": "milo1/tcgplayer/yugioh",
       "descriptor": {"game": "yugioh", "source": "tcgplayer", "profile": "printings", "description": "TCGplayer marketplace printing catalog.", "result_identifier": "tcgplayer_product", "recommended": true},
       "source": {"type": "tcgcsv", "category_id": 2},
-      "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
+      "embedding_model": "collectorvision@8b295ab80a997766afc00c640a616c1f2716df21:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
       "enabled": true,
       "seed_required": true
     },
@@ -41,7 +41,7 @@
       "key": "milo1/tcgplayer/pokemon",
       "descriptor": {"game": "pokemon", "source": "tcgplayer", "profile": "printings", "description": "TCGplayer marketplace printing catalog.", "result_identifier": "tcgplayer_product", "recommended": true},
       "source": {"type": "tcgcsv", "category_id": 3},
-      "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
+      "embedding_model": "collectorvision@8b295ab80a997766afc00c640a616c1f2716df21:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
       "enabled": true,
       "seed_required": true
     },
@@ -49,7 +49,7 @@
       "key": "milo1/tcgplayer/fab",
       "descriptor": {"game": "flesh-and-blood", "source": "tcgplayer", "profile": "printings", "description": "TCGplayer marketplace printing catalog.", "result_identifier": "tcgplayer_product", "recommended": true},
       "source": {"type": "tcgcsv", "category_id": 62},
-      "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
+      "embedding_model": "collectorvision@8b295ab80a997766afc00c640a616c1f2716df21:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
       "enabled": true,
       "seed_required": true
     },
@@ -57,7 +57,7 @@
       "key": "milo1/tcgplayer/digimon",
       "descriptor": {"game": "digimon-card-game", "source": "tcgplayer", "profile": "printings", "description": "TCGplayer marketplace printing catalog.", "result_identifier": "tcgplayer_product", "recommended": true},
       "source": {"type": "tcgcsv", "category_id": 63},
-      "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
+      "embedding_model": "collectorvision@8b295ab80a997766afc00c640a616c1f2716df21:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
       "enabled": true,
       "seed_required": true
     },
@@ -65,7 +65,7 @@
       "key": "milo1/tcgplayer/one-piece",
       "descriptor": {"game": "one-piece", "source": "tcgplayer", "profile": "printings", "description": "TCGplayer marketplace printing catalog.", "result_identifier": "tcgplayer_product", "recommended": true},
       "source": {"type": "tcgcsv", "category_id": 68},
-      "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
+      "embedding_model": "collectorvision@8b295ab80a997766afc00c640a616c1f2716df21:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
       "enabled": true,
       "seed_required": true
     },
@@ -73,7 +73,7 @@
       "key": "milo1/tcgplayer/lorcana",
       "descriptor": {"game": "lorcana", "source": "tcgplayer", "profile": "printings", "description": "TCGplayer marketplace printing catalog.", "result_identifier": "tcgplayer_product", "recommended": true},
       "source": {"type": "tcgcsv", "category_id": 71},
-      "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
+      "embedding_model": "collectorvision@8b295ab80a997766afc00c640a616c1f2716df21:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
       "enabled": true,
       "seed_required": true
     },
@@ -81,7 +81,7 @@
       "key": "milo1/tcgplayer/swu",
       "descriptor": {"game": "star-wars-unlimited", "source": "tcgplayer", "profile": "printings", "description": "TCGplayer marketplace printing catalog.", "result_identifier": "tcgplayer_product", "recommended": true},
       "source": {"type": "tcgcsv", "category_id": 79},
-      "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
+      "embedding_model": "collectorvision@8b295ab80a997766afc00c640a616c1f2716df21:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
       "enabled": true,
       "seed_required": true
     },
@@ -89,7 +89,7 @@
       "key": "milo1/tcgplayer/union-arena",
       "descriptor": {"game": "union-arena", "source": "tcgplayer", "profile": "printings", "description": "TCGplayer marketplace printing catalog.", "result_identifier": "tcgplayer_product", "recommended": true},
       "source": {"type": "tcgcsv", "category_id": 81},
-      "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
+      "embedding_model": "collectorvision@8b295ab80a997766afc00c640a616c1f2716df21:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
       "enabled": true,
       "seed_required": true
     },
@@ -97,7 +97,7 @@
       "key": "milo1/tcgplayer/pokemon-japan",
       "descriptor": {"game": "pokemon-japan", "source": "tcgplayer", "profile": "printings", "description": "TCGplayer marketplace printing catalog.", "result_identifier": "tcgplayer_product", "recommended": true},
       "source": {"type": "tcgcsv", "category_id": 85},
-      "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
+      "embedding_model": "collectorvision@8b295ab80a997766afc00c640a616c1f2716df21:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
       "enabled": true,
       "seed_required": true
     },
@@ -105,7 +105,7 @@
       "key": "milo1/tcgplayer/gundam-card-game",
       "descriptor": {"game": "gundam-card-game", "source": "tcgplayer", "profile": "printings", "description": "TCGplayer marketplace printing catalog.", "result_identifier": "tcgplayer_product", "recommended": true},
       "source": {"type": "tcgcsv", "category_id": 86},
-      "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
+      "embedding_model": "collectorvision@8b295ab80a997766afc00c640a616c1f2716df21:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
       "enabled": true,
       "seed_required": true
     },
@@ -113,7 +113,7 @@
       "key": "milo1/tcgplayer/riftbound",
       "descriptor": {"game": "riftbound", "source": "tcgplayer", "profile": "printings", "description": "TCGplayer marketplace printing catalog.", "result_identifier": "tcgplayer_product", "recommended": true},
       "source": {"type": "tcgcsv", "category_id": 89},
-      "embedding_model": "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
+      "embedding_model": "collectorvision@8b295ab80a997766afc00c640a616c1f2716df21:milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df",
       "enabled": true,
       "seed_required": true
     }
