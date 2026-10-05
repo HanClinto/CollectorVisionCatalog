@@ -114,6 +114,14 @@ def test_seed_plan_deduplicates_shared_image_downloads() -> None:
     assert plan.downloads_required == 1
 
 
+def test_cli_defaults_to_shared_cache_root() -> None:
+    args = seed.parse_args(["--version", "cache-refresh", "--refresh-cache"])
+
+    assert args.cache_root == Path("data-cache")
+    assert args.refresh_cache is True
+    assert args.build is False
+
+
 def test_legacy_scryfall_embeddings_map_front_and_back_rows(tmp_path: Path) -> None:
     front_id = "ab000000-0000-0000-0000-000000000001"
     back_id = "ab000000-0000-0000-0000-000000000002"

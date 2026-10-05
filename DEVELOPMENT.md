@@ -59,6 +59,30 @@ runs restore the newest non-expired artifact automatically.
 
 ## Historical Scryfall replay
 
+Local catalog scripts use `data-cache` by default. Set
+`COLLECTORVISION_CACHE_ROOT` to use another cache root without repeating
+`--cache-root`. The seed scripts can refresh source images without computing
+embeddings:
+
+```bash
+COLLECTORVISION_CACHE_ROOT=/path/to/image-cache \
+  python scripts/seed_scryfall.py \
+  --version cache-refresh \
+  --refresh-cache \
+  --max-downloads 200000
+
+COLLECTORVISION_CACHE_ROOT=/path/to/image-cache \
+  python scripts/seed_tcgplayer.py \
+  --version cache-refresh \
+  --refresh-cache \
+  --max-downloads 400000 \
+  --catalog milo1/tcgplayer/mtg
+```
+
+Scryfall refreshes only missing or stale revisions. TCGplayer images are
+re-downloaded because its cache paths do not retain the source `modifiedOn`
+revision.
+
 Published Scryfall source revisions can be replayed from `.json`, `.json.gz`,
 `.jsonl`, or `.jsonl.gz` archives:
 

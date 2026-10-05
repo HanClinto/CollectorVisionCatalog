@@ -50,6 +50,7 @@ MILO1_MODEL_ID = (
     "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:"
     "milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df"
 )
+DEFAULT_CACHE_ROOT = Path(os.environ.get("COLLECTORVISION_CACHE_ROOT", "data-cache"))
 
 
 class TCGplayerImageUnavailable(ValidationError):
@@ -1207,7 +1208,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--version", required=True)
     parser.add_argument("--allow-full-rebuild", action="store_true")
     parser.add_argument("--image-dir", type=Path, action="append", default=[])
-    parser.add_argument("--cache-root", type=Path, default=None)
+    parser.add_argument("--cache-root", type=Path, default=DEFAULT_CACHE_ROOT)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument(
         "--expected-source-revisions",

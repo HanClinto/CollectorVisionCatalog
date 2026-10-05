@@ -28,6 +28,7 @@ from collectorvision_catalog.quality import apply_quality_rules, load_quality_ru
 
 _UPDATER = runpy.run_path(str(Path(__file__).with_name("update_catalogs.py")))
 ScryfallImageCache = _UPDATER["ScryfallImageCache"]
+DEFAULT_CACHE_ROOT = _UPDATER["DEFAULT_CACHE_ROOT"]
 create_embedder = _UPDATER["create_embedder"]
 fetch_scryfall_snapshot = _UPDATER["fetch_scryfall_snapshot"]
 load_config = _UPDATER["load_config"]
@@ -137,6 +138,7 @@ def build_seed(
     max_downloads: int,
     refresh_workers: int,
     build: bool,
+    refresh_cache: bool = False,
     expected_revision: SourceRevision | None = None,
     source_override: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -160,7 +162,9 @@ def build_seed(
     rows = list(quality_result.rows)
     image_cache = ScryfallImageCache(cache_root, rows)
     legacy_embeddings = (
-        {} if legacy_catalog is None else load_legacy_embeddings(legacy_catalog)
+        {}
+        if refresh_cache or legacy_catalog is None
+        else load_legacy_embeddings(legacy_catalog)
     )
     plan = create_seed_plan(rows, image_cache, legacy_embeddings)
     summary: dict[str, Any] = {
@@ -171,7 +175,7 @@ def build_seed(
         "quality_excluded_rows": len(quality_result.findings),
     }
     print(json.dumps(summary, indent=2, sort_keys=True))
-    if not build:
+    if not build and not refresh_cache:
         return summary
     if plan.downloads_required > max_downloads:
         raise ValidationError(
@@ -180,6 +184,9 @@ def build_seed(
         )
 
     refresh_seed_cache(plan, image_cache, workers=refresh_workers)
+    if not build:
+        summary["cache_refreshed"] = plan.downloads_required
+        return summary
     output_dir.mkdir(parents=True, exist_ok=True)
     result = build_catalog(
         plan.rows,
@@ -288,7 +295,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=Path,
         default=Path("config/source-quality-overrides.json"),
     )
-    parser.add_argument("--cache-root", type=Path, required=True)
+    parser.add_argument("--cache-root", type=Path, default=DEFAULT_CACHE_ROOT)
     parser.add_argument(
         "--legacy-catalog",
         type=Path,
@@ -313,10 +320,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=1000,
         help="Safety limit; the build aborts before refresh when preflight exceeds it",
     )
-    parser.add_argument(
+    action = parser.add_mutually_exclusive_group()
+    action.add_argument(
         "--build",
         action="store_true",
         help="Refresh and build after preflight; without this flag only print the plan",
+    )
+    action.add_argument(
+        "--refresh-cache",
+        action="store_true",
+        help="Refresh every missing or stale source image without building embeddings",
     )
     return parser.parse_args(argv)
 
@@ -349,6 +362,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_downloads=args.max_downloads,
         refresh_workers=args.refresh_workers,
         build=args.build,
+        refresh_cache=args.refresh_cache,
         expected_revision=expected_revision,
         source_override=source_override,
     )

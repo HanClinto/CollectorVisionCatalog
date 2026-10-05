@@ -82,3 +82,19 @@ def test_cli_accepts_from_scratch_catalog_without_legacy_dir() -> None:
 
     assert args.legacy_dir is None
     assert args.catalog_keys == ["milo1/tcgplayer/pokemon-japan"]
+
+
+def test_cli_defaults_to_shared_cache_root_for_refresh() -> None:
+    args = seed.parse_args(
+        [
+            "--version",
+            "cache-refresh",
+            "--refresh-cache",
+            "--catalog",
+            "milo1/tcgplayer/mtg",
+        ]
+    )
+
+    assert args.cache_root == Path("data-cache")
+    assert args.refresh_cache is True
+    assert args.build is False

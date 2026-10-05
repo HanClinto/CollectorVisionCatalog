@@ -28,6 +28,7 @@ from collectorvision_catalog.quality import apply_quality_rules, load_quality_ru
 _UPDATER = runpy.run_path(str(Path(__file__).with_name("update_catalogs.py")))
 TCGplayerImageCache = _UPDATER["TCGplayerImageCache"]
 TCGplayerImageUnavailable = _UPDATER["TCGplayerImageUnavailable"]
+DEFAULT_CACHE_ROOT = _UPDATER["DEFAULT_CACHE_ROOT"]
 create_embedder = _UPDATER["create_embedder"]
 fetch_tcgcsv_snapshots = _UPDATER["fetch_tcgcsv_snapshots"]
 load_config = _UPDATER["load_config"]
@@ -169,6 +170,7 @@ def build_seed(
     max_downloads: int,
     refresh_workers: int,
     build: bool,
+    refresh_cache: bool = False,
     catalog_keys: Sequence[str] | None = None,
     expected_revision: SourceRevision | None = None,
 ) -> dict[str, Any]:
@@ -186,7 +188,7 @@ def build_seed(
     if missing_configs:
         raise ValidationError(f"missing TCGplayer seed configs: {missing_configs}")
     legacy_keys = set(selected_keys).intersection(LEGACY_CATALOG_KEYS)
-    if legacy_keys and legacy_dir is None:
+    if build and legacy_keys and legacy_dir is None:
         raise ValidationError("--legacy-dir is required when seeding legacy catalogs")
 
     plans: list[TCGplayerSeedPlan] = []
@@ -214,7 +216,7 @@ def build_seed(
         legacy_key = LEGACY_CATALOG_KEYS.get(catalog_key)
         legacy_embeddings = (
             load_legacy_embeddings(legacy_dir, legacy_key)
-            if legacy_key is not None and legacy_dir is not None
+            if not refresh_cache and legacy_key is not None and legacy_dir is not None
             else {}
         )
         image_cache = TCGplayerImageCache(cache_root, rows)
@@ -244,13 +246,36 @@ def build_seed(
         ),
     }
     print(json.dumps(summary, indent=2, sort_keys=True), flush=True)
-    if not build:
+    if not build and not refresh_cache:
         return summary
-    if total_downloads > max_downloads:
+    refresh_downloads = (
+        sum(len(plan.rows) for plan in plans) if refresh_cache else total_downloads
+    )
+    if refresh_downloads > max_downloads:
         raise ValidationError(
-            f"seed requires {total_downloads:,} downloads, exceeding the explicit limit of "
+            f"seed requires {refresh_downloads:,} downloads, exceeding the explicit limit of "
             f"{max_downloads:,}; rerun with --max-downloads after reviewing preflight"
         )
+    if refresh_cache:
+        unavailable_total = 0
+        for plan in plans:
+            refreshing_cache = TCGplayerImageCache(
+                cache_root,
+                plan.rows,
+                refresh_urls=(row.image_url for row in plan.rows),
+            )
+            unavailable_total += len(
+                refresh_inference_images(
+                    plan.rows,
+                    refreshing_cache,
+                    workers=refresh_workers,
+                    catalog_key=plan.catalog_key,
+                )
+            )
+        summary["downloads_required"] = refresh_downloads
+        summary["unavailable_images"] = unavailable_total
+        summary["cache_refreshed"] = refresh_downloads - unavailable_total
+        return summary
     if len(model_ids) != 1:
         raise ValidationError("all TCGplayer seed catalogs must use the same embedding model")
 
@@ -331,7 +356,7 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=Path,
         default=Path("config/source-quality-overrides.json"),
     )
-    parser.add_argument("--cache-root", type=Path, required=True)
+    parser.add_argument("--cache-root", type=Path, default=DEFAULT_CACHE_ROOT)
     parser.add_argument(
         "--legacy-dir",
         type=Path,
@@ -354,10 +379,16 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         default=1000,
         help="Safety limit; the build aborts before refresh when preflight exceeds it",
     )
-    parser.add_argument(
+    action = parser.add_mutually_exclusive_group()
+    action.add_argument(
         "--build",
         action="store_true",
         help="Refresh and build after preflight; without this flag only print the plan",
+    )
+    action.add_argument(
+        "--refresh-cache",
+        action="store_true",
+        help="Re-download every current source image without building embeddings",
     )
     return parser.parse_args(argv)
 
@@ -392,6 +423,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_downloads=args.max_downloads,
         refresh_workers=args.refresh_workers,
         build=args.build,
+        refresh_cache=args.refresh_cache,
         catalog_keys=selected_keys,
         expected_revision=expected_revision,
     )
