@@ -384,6 +384,26 @@ def test_scryfall_cache_refreshes_after_webp_revision_changes(tmp_path: Path) ->
     assert not cache.is_current(row)
 
 
+def test_scryfall_cache_can_force_refresh_legacy_png(tmp_path: Path) -> None:
+    images_root = tmp_path / "scryfall" / "images"
+    png_path = images_root / "png" / "front" / "c" / "a" / f"{CARD_ID}.png"
+    png_path.parent.mkdir(parents=True)
+    Image.new("RGB", (2, 2)).save(png_path)
+    row = make_row(
+        f"https://cards.scryfall.io/display/front/c/a/{CARD_ID}.webp?999"
+    )
+    previous_url = f"https://cards.scryfall.io/png/front/c/a/{CARD_ID}.png?123"
+
+    cache = updater.ScryfallImageCache(
+        tmp_path,
+        [row],
+        previous_image_urls={row.key: previous_url},
+        force_refresh_legacy_png_urls={row.image_url},
+    )
+
+    assert not cache.is_current(row)
+
+
 def test_tcgplayer_cache_resolves_sharded_product_image(tmp_path: Path) -> None:
     images_root = tmp_path / "tcgplayer" / "images" / "product"
     path = images_root / "1" / "2" / "12345.jpg"

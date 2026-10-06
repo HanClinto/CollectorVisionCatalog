@@ -909,9 +909,11 @@ class ScryfallImageCache:
         rows: Iterable[RecognitionRow],
         *,
         previous_image_urls: Mapping[str, str] | None = None,
+        force_refresh_legacy_png_urls: Iterable[str] = (),
     ) -> None:
         self.images_root = _resolve_scryfall_images_root(cache_root)
         previous_image_urls = previous_image_urls or {}
+        force_refresh_legacy_png_urls = frozenset(force_refresh_legacy_png_urls)
         entries_by_url: dict[str, list[tuple[Path, Path | None, int]]] = defaultdict(list)
         for row in rows:
             current_path = self.path_for_row(row)
@@ -919,6 +921,7 @@ class ScryfallImageCache:
             previous_url = previous_image_urls.get(row.key)
             allow_legacy_png = (
                 current_path.suffix == ".webp"
+                and row.image_url not in force_refresh_legacy_png_urls
                 and (
                     previous_url is None
                     or previous_url == row.image_url
