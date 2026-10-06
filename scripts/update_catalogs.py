@@ -922,7 +922,7 @@ class ScryfallImageCache:
                 and (
                     previous_url is None
                     or previous_url == row.image_url
-                    or _scryfall_image_format(previous_url) == ("png", ".png")
+                    or _is_legacy_scryfall_png_url(previous_url)
                 )
             )
             entries_by_url[row.image_url].append(
@@ -1136,6 +1136,13 @@ def _scryfall_image_format(image_url: str) -> tuple[str, str]:
     if expected_suffixes.get(image_format) != suffix:
         raise ValidationError(f"unsupported Scryfall image URL: {image_url}")
     return image_format, suffix
+
+
+def _is_legacy_scryfall_png_url(image_url: str) -> bool:
+    try:
+        return _scryfall_image_format(image_url) == ("png", ".png")
+    except ValidationError:
+        return urlparse(image_url).netloc == "errors.scryfall.com"
 
 
 def _resolve_scryfall_images_root(cache_root: Path) -> Path:
