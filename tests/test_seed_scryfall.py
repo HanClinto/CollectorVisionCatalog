@@ -67,6 +67,34 @@ def test_seed_plan_reports_current_stale_and_missing_cache_rows(tmp_path: Path) 
     }
 
 
+def test_seed_plan_reuses_png_cache_during_display_webp_migration(
+    tmp_path: Path,
+) -> None:
+    row = make_row(CURRENT_ID, 100)
+    row = replace(
+        row,
+        image_url=(
+            f"https://cards.scryfall.io/display/front/a/a/{CURRENT_ID}.webp?200"
+        ),
+    )
+    previous_url = f"https://cards.scryfall.io/png/front/a/a/{CURRENT_ID}.png?100"
+    cache = seed.ScryfallImageCache(
+        tmp_path,
+        [row],
+        previous_image_urls={row.key: previous_url},
+    )
+    png_path = cache._legacy_png_path(row)
+    png_path.parent.mkdir(parents=True)
+    Image.new("RGB", (2, 2)).save(png_path)
+
+    plan = seed.create_seed_plan([row], cache)
+
+    assert plan.cache_current == 1
+    assert plan.cache_stale == 0
+    assert plan.cache_missing == 0
+    assert plan.downloads_required == 0
+
+
 def test_refresh_seed_cache_only_loads_pending_rows() -> None:
     rows = [make_row(CURRENT_ID, 100), make_row(STALE_ID, 200), make_row(MISSING_ID, 300)]
     loaded: set[str] = set()

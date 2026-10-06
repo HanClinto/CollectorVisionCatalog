@@ -78,11 +78,10 @@ def create_seed_plan(
     cache_stale = 0
     cache_missing = 0
     for row in download_rows:
-        path = image_cache.path_for_row(row)
-        if not path.is_file():
-            cache_missing += 1
-        elif image_cache.is_current(row):
+        if image_cache.is_current(row):
             cache_current += 1
+        elif not image_cache.path_for_row(row).is_file():
+            cache_missing += 1
         else:
             cache_stale += 1
     return SeedPlan(
