@@ -47,8 +47,9 @@ USER_AGENT = "CollectorVisionCatalog/0.1 (+https://github.com/HanClinto/Collecto
 IMAGE_SUFFIXES = {".bmp", ".gif", ".jpeg", ".jpg", ".png", ".webp"}
 _GZIP_MAGIC = b"\x1f\x8b"
 _MAX_JSON_VALUE_CHARS = 16 * 1024 * 1024
+# Keep the published catalog identity when only the runtime preprocessing changes.
 MILO1_MODEL_ID = (
-    "collectorvision@8b295ab80a997766afc00c640a616c1f2716df21:"
+    "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:"
     "milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df"
 )
 DEFAULT_CACHE_ROOT = Path(os.environ.get("COLLECTORVISION_CACHE_ROOT", "data-cache"))
@@ -462,6 +463,7 @@ def build_enabled_catalogs(
     embedder_factory: Callable[[str, int], Embedder] | None = None,
     image_loader: ImageLoader | None = None,
     skip_unchanged: bool = False,
+    rebuild_landscape_embeddings: bool = False,
 ) -> dict[str, Any]:
     configs = [catalog for catalog in load_config(config_path) if catalog.enabled]
     if not configs:
@@ -474,6 +476,10 @@ def build_enabled_catalogs(
     quality_rules = load_quality_rules(quality_overrides_path)
     expected_source_revisions = expected_source_revisions or {}
     snapshots: dict[str, SourceSnapshot[RecognitionRow]] = {}
+    if rebuild_landscape_embeddings and cache_root is None:
+        raise ValidationError(
+            "rebuilding landscape embeddings requires a local image cache root"
+        )
     if source_rows_factory is not None:
         for config in configs:
             revision = expected_source_revisions.get(config.key) or SourceRevision(
@@ -569,6 +575,11 @@ def build_enabled_catalogs(
                 f"catalog {config.key!r} requires a seed release; "
                 "run locally with --allow-full-rebuild for the first build"
             )
+        if rebuild_landscape_embeddings and previous is None:
+            raise ValidationError(
+                f"catalog {config.key!r} needs an existing builder state for "
+                "the landscape embedding rebuild"
+            )
 
         snapshot = snapshots[config.key]
         rows = list(snapshot.rows)
@@ -582,24 +593,28 @@ def build_enabled_catalogs(
         quality_reports[config.key]["source_revision"] = snapshot.revision.to_dict()
         if source_type == "scryfall" and previous is not None:
             rows = list(_preserve_recent_scryfall_images(rows, previous.rows))
-        if seed_embeddings is not None:
-            reusable_keys = {
-                row.key
-                for row in rows
-                if seed_fingerprints is not None
-                and seed_fingerprints.get(row.key) == row.image_fingerprint
-            }
-            missing_seed_keys = [row.key for row in rows if row.key not in reusable_keys]
-            if len(missing_seed_keys) > seed_inference_limit:
-                raise ValidationError(
-                    f"catalog {config.key!r} is missing {len(missing_seed_keys):,} "
-                    f"embedding(s) from seed catalog {seed_label!r}, exceeding "
-                    f"its limit of {seed_inference_limit:,}; "
-                    f"examples: {missing_seed_keys[:3]}"
+        if previous is not None:
+            _check_image_change_budget(config, rows, previous)
+        if (
+            rebuild_landscape_embeddings
+            and source_type == "scryfall"
+            and cache_root is not None
+            and previous is not None
+        ):
+            previous_fingerprints = {row.key: row.image_fingerprint for row in previous.rows}
+            changed_rows = [
+                row for row in rows if previous_fingerprints.get(row.key) != row.image_fingerprint
+            ]
+            if changed_rows:
+                scryfall_cache = ScryfallImageCache(
+                    cache_root,
+                    rows,
+                    previous_image_urls={row.key: row.image_url for row in previous.rows},
                 )
-            seed_embeddings = {
-                key: embedding for key, embedding in seed_embeddings.items() if key in reusable_keys
-            }
+                for row in changed_rows:
+                    if not scryfall_cache.is_current(row):
+                        image = scryfall_cache(row.image_url)
+                        image.close()
         unavailable_keys: set[str] = set()
         if source_type == "tcgcsv" and cache_root is not None:
             availability_cache = TCGplayerImageCache(cache_root, rows)
@@ -613,7 +628,10 @@ def build_enabled_catalogs(
                 else {row.key: row.image_fingerprint for row in previous.rows}
             )
             refresh_rows = [
-                row for row in rows if previous_fingerprints.get(row.key) != row.image_fingerprint
+                row
+                for row in rows
+                if previous_fingerprints.get(row.key) != row.image_fingerprint
+                or (rebuild_landscape_embeddings and not availability_cache.is_cached(row))
             ]
             if refresh_rows:
                 refresh_cache = TCGplayerImageCache(
@@ -633,15 +651,37 @@ def build_enabled_catalogs(
                 unavailable_keys.update(newly_unavailable)
                 rows = [row for row in rows if row.key not in newly_unavailable]
             quality_reports[config.key]["source_unavailable_rows"] = len(unavailable_keys)
-        if previous is not None:
-            changed_rows = _count_changed_image_rows(rows, previous)
-            if changed_rows > config.max_changed_rows:
+        landscape_keys: set[str] = set()
+        if rebuild_landscape_embeddings:
+            landscape_keys = _landscape_row_keys(
+                rows,
+                cache_root=cache_root,
+                previous_rows=previous.rows if previous is not None else (),
+            )
+            quality_reports[config.key]["landscape_rows_rebuilt"] = len(landscape_keys)
+        if seed_embeddings is not None:
+            reusable_keys = {
+                row.key
+                for row in rows
+                if seed_fingerprints is not None
+                and seed_fingerprints.get(row.key) == row.image_fingerprint
+            }
+            missing_seed_keys = [row.key for row in rows if row.key not in reusable_keys]
+            if len(missing_seed_keys) > seed_inference_limit:
                 raise ValidationError(
-                    f"catalog {config.key!r} has {changed_rows:,} image changes, exceeding "
-                    f"its safety limit of {config.max_changed_rows:,}; run a reviewed local rebuild"
+                    f"catalog {config.key!r} is missing {len(missing_seed_keys):,} "
+                    f"embedding(s) from seed catalog {seed_label!r}, exceeding "
+                    f"its limit of {seed_inference_limit:,}; "
+                    f"examples: {missing_seed_keys[:3]}"
                 )
+            seed_embeddings = {
+                key: embedding for key, embedding in seed_embeddings.items() if key in reusable_keys
+            }
+        if previous is not None:
+            _check_image_change_budget(config, rows, previous, force_embed_keys=landscape_keys)
             if (
                 skip_unchanged
+                and not landscape_keys
                 and previous.manifest.descriptor == config.descriptor
                 and previous.manifest.embedding_model == config.embedding_model
                 and _rows_match_previous(rows, previous)
@@ -676,21 +716,7 @@ def build_enabled_catalogs(
                     previous_image_urls=previous_image_urls,
                 )
             elif source_type == "tcgcsv":
-                previous_fingerprints = (
-                    {}
-                    if previous is None
-                    else {row.key: row.image_fingerprint for row in previous.rows}
-                )
-                refresh_urls = (
-                    row.image_url
-                    for row in rows
-                    if previous_fingerprints.get(row.key) != row.image_fingerprint
-                )
-                effective_image_loader = TCGplayerImageCache(
-                    cache_root,
-                    rows,
-                    refresh_urls=refresh_urls,
-                )
+                effective_image_loader = TCGplayerImageCache(cache_root, rows)
             else:
                 raise AssertionError(f"unsupported source type {source_type!r}")
         else:
@@ -715,6 +741,7 @@ def build_enabled_catalogs(
             previous_build=previous,
             image_loader=effective_image_loader,
             batch_size=batch_size,
+            force_embed_keys=landscape_keys,
         )
         manifest_path = output_dir / manifest_filename_for_catalog(config.key)
         validate_artifacts(
@@ -932,10 +959,17 @@ class ScryfallImageCache:
                     or _is_legacy_scryfall_png_url(previous_url)
                 )
             )
+            fallback_path = legacy_png_path if allow_legacy_png else None
+            if current_path.suffix == ".png":
+                fallback_path = (
+                    self.images_root
+                    / "display"
+                    / current_path.relative_to(self.images_root / "png").with_suffix(".webp")
+                )
             entries_by_url[row.image_url].append(
                 (
                     current_path,
-                    legacy_png_path if allow_legacy_png else None,
+                    fallback_path,
                     revision,
                 )
             )
@@ -981,7 +1015,14 @@ class ScryfallImageCache:
                 revision,
             )
             if cached_path is not None:
-                return _open_rgb_image(cached_path)
+                try:
+                    return _open_rgb_image(cached_path)
+                except (OSError, SyntaxError) as error:
+                    print(
+                        f"Unreadable cached Scryfall image {cached_path}: {error}; "
+                        "downloading again",
+                        flush=True,
+                    )
 
         request = Request(
             image_url,
@@ -1007,7 +1048,7 @@ class ScryfallImageCache:
     @staticmethod
     def _cached_scryfall_path(
         current_path: Path,
-        legacy_png_path: Path | None,
+        fallback_path: Path | None,
         revision: int,
     ) -> Path | None:
         if current_path.is_file() and (
@@ -1015,15 +1056,19 @@ class ScryfallImageCache:
         ):
             return current_path
         if (
-            legacy_png_path is not None
-            and legacy_png_path.is_file()
+            fallback_path is not None
+            and fallback_path.is_file()
             and (
                 revision == 0
-                or revision - int(legacy_png_path.stat().st_mtime)
-                <= MAX_SCRYFALL_IMAGE_REVISION_GAP_SECONDS
+                or (
+                    abs(fallback_path.stat().st_mtime - revision) < 1.0
+                    if fallback_path.suffix == ".webp"
+                    else revision - int(fallback_path.stat().st_mtime)
+                    <= MAX_SCRYFALL_IMAGE_REVISION_GAP_SECONDS
+                )
             )
         ):
-            return legacy_png_path
+            return fallback_path
         return None
 
 
@@ -1200,6 +1245,72 @@ def _open_rgb_image(path: Path) -> Image.Image:
     return loaded
 
 
+def _image_dimensions(path: Path) -> tuple[int, int] | None:
+    if not path.is_file():
+        return None
+    try:
+        with Image.open(path) as image:
+            return image.size
+    except (OSError, SyntaxError):
+        return None
+
+
+def _landscape_row_keys(
+    rows: Sequence[RecognitionRow],
+    *,
+    cache_root: Path | None,
+    previous_rows: Sequence[RecognitionRow],
+) -> set[str]:
+    if cache_root is None:
+        raise ValidationError("landscape detection requires a local image cache root")
+    previous_image_urls = {row.key: row.image_url for row in previous_rows}
+    scryfall_rows = [row for row in rows if row.provider == "scryfall"]
+    tcgplayer_rows = [row for row in rows if row.provider == "tcgplayer"]
+    scryfall_cache = (
+        ScryfallImageCache(
+            cache_root,
+            scryfall_rows,
+            previous_image_urls=previous_image_urls,
+        )
+        if scryfall_rows
+        else None
+    )
+    tcgplayer_cache = TCGplayerImageCache(cache_root, tcgplayer_rows) if tcgplayer_rows else None
+    landscape_keys: set[str] = set()
+    for row in rows:
+        if row.provider == "scryfall":
+            if scryfall_cache is None:
+                raise AssertionError("Scryfall cache was not initialized")
+            cached_paths = (
+                ScryfallImageCache._cached_scryfall_path(current, legacy, revision) or current
+                for current, legacy, revision in scryfall_cache._entries[row.image_url]
+            )
+            dimensions = next(
+                (
+                    value
+                    for path in cached_paths
+                    if path is not None and (value := _image_dimensions(path)) is not None
+                ),
+                None,
+            )
+        elif row.provider == "tcgplayer":
+            if tcgplayer_cache is None:
+                raise AssertionError("TCGplayer cache was not initialized")
+            dimensions = _image_dimensions(tcgplayer_cache.path_for_row(row))
+        else:
+            raise ValidationError(
+                f"unsupported image provider {row.provider!r} for landscape detection"
+            )
+        if dimensions is None:
+            raise ValidationError(
+                f"image for {row.key!r} is missing from the local cache; "
+                "refresh the source image cache before rebuilding landscape embeddings"
+            )
+        if dimensions[0] > dimensions[1]:
+            landscape_keys.add(row.key)
+    return landscape_keys
+
+
 def _is_valid_image_file(path: Path) -> bool:
     if not path.is_file():
         return False
@@ -1248,14 +1359,33 @@ def _response_results(payload: dict[str, Any], source_name: str) -> list[dict[st
 def _count_changed_image_rows(
     rows: Sequence[RecognitionRow],
     previous: CatalogBuild,
+    *,
+    force_embed_keys: Iterable[str] = (),
 ) -> int:
     previous_fingerprints = {row.key: row.image_fingerprint for row in previous.rows}
+    forced_keys = frozenset(force_embed_keys)
     changed_or_added = sum(
-        previous_fingerprints.get(row.key) != row.image_fingerprint for row in rows
+        row.key in forced_keys or previous_fingerprints.get(row.key) != row.image_fingerprint
+        for row in rows
     )
     current_keys = {row.key for row in rows}
     removed = len(set(previous_fingerprints).difference(current_keys))
     return changed_or_added + removed
+
+
+def _check_image_change_budget(
+    config: CatalogConfig,
+    rows: Sequence[RecognitionRow],
+    previous: CatalogBuild,
+    *,
+    force_embed_keys: Iterable[str] = (),
+) -> None:
+    changed_rows = _count_changed_image_rows(rows, previous, force_embed_keys=force_embed_keys)
+    if changed_rows > config.max_changed_rows:
+        raise ValidationError(
+            f"catalog {config.key!r} has {changed_rows:,} image changes, exceeding "
+            f"its safety limit of {config.max_changed_rows:,}; run a reviewed local rebuild"
+        )
 
 
 def _preserve_recent_scryfall_images(
@@ -1396,6 +1526,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--cache-root", type=Path, default=DEFAULT_CACHE_ROOT)
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument(
+        "--rebuild-landscape-embeddings",
+        action="store_true",
+        help="Re-embed cached landscape images as a one-time portrait-normalization migration",
+    )
+    parser.add_argument(
         "--expected-source-revisions",
         type=Path,
         help="Source-status JSON captured before choosing the release version",
@@ -1452,6 +1587,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         batch_size=args.batch_size,
         expected_source_revisions=expected_revisions,
         scryfall_source_override=scryfall_source_override,
+        rebuild_landscape_embeddings=args.rebuild_landscape_embeddings,
     )
     print(json.dumps(summary, indent=2, sort_keys=True))
     return 0

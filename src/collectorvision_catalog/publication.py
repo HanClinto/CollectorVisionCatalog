@@ -402,10 +402,14 @@ def _build_public_delta(
     deleted_keys = previous_keys - current_keys
     added_keys = current_keys - previous_keys
     surviving_keys = previous_keys & current_keys
+    previous_index = {row.key: index for index, row in enumerate(previous_build.rows)}
     recognition_changed = {
         key
         for key in surviving_keys
         if _requires_delta_upsert(previous_rows[key], current_rows[key])
+        or not np.array_equal(
+            previous_build.embeddings[previous_index[key]], build.embeddings[current_index[key]]
+        )
     } | added_keys
 
     previous_metadata = {

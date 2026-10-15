@@ -165,6 +165,13 @@ embeddings. Core-record and metadata changes are independent from image
 fingerprints: a corrected card name updates recognition without causing an
 image download or inference.
 
+For reviewed preprocessing corrections, `build_catalog(force_embed_keys=...)`
+can bypass both prior-state and seed reuse for selected rows without changing
+their source fingerprints or the model identity. An actual FP16 embedding
+change produces an upsert in both private and public deltas, even when the
+source record is unchanged. Identical recomputed embeddings produce no
+spurious delta.
+
 ## Full snapshots and deltas
 
 Version 0 contains a complete base. Changed catalogs normally publish only an

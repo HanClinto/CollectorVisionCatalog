@@ -57,6 +57,46 @@ Nightly** with that draft tag in `bootstrap_release`. After the successful run
 has uploaded `catalog-v2-builder-state`, delete the draft release. Subsequent
 runs restore the newest non-expired artifact automatically.
 
+## Local catch-up and handoff
+
+Use the private builder state whose manifest versions match
+`catalog-feed-v2.json`, not an older local build. The retained Actions artifact
+can contain both `current` and `next`; after publication, `next` normally matches
+the feed.
+
+For the October 2026 orientation correction, run `scripts/nightly_catalogs.py`
+locally with `--rebuild-landscape-embeddings` and the populated image cache.
+This re-embeds only landscape rows plus genuinely changed source images, keeps
+portrait embeddings, and emits ordinary exact-predecessor deltas. Subsequent
+nightly runs must omit the flag. Missing or unreadable images must be refreshed
+before the landscape scan can complete.
+
+Milo is still **1.0.0**, with the same weights hash. Keep the published
+`embedding_model` identity in `config/catalogs.json` and the updater aligned
+with the retained state. The pinned CollectorVision runtime has newer portrait
+preprocessing; its code revision is not a new Milo weights version and must
+not by itself invalidate every catalog.
+
+The normal 5,000-image-change limit remains enabled on Actions and is checked
+before image downloads. If a reviewed local catch-up needs a higher limit,
+use a separate local config, retain it as a release audit input, and do not
+raise the checked-in limits.
+
+After auditing a local release:
+
+1. Publish its staged assets and commit its generated feed and publication entry.
+2. Package the generated `next-state` directory with
+   `tar -czf builder-state.tar.gz -C /path/to/next-state .` and upload it to a
+   temporary **draft** release.
+3. Dispatch **Publish Catalog v2 Nightly** with that draft tag in
+   `bootstrap_release`. An explicit bootstrap overrides retained artifacts;
+   its manifests must still match the checked-out feed.
+4. Confirm the run uploaded fresh `catalog-v2-builder-state` before deleting
+   the temporary draft release. Scheduled runs then restore that new state.
+
+Do not upload the image cache as builder state. The hosted runner should only
+need images for subsequent small source deltas.
+
 ## Historical Scryfall replay
 
 Local catalog scripts use `data-cache` by default. Set

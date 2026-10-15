@@ -566,6 +566,7 @@ def build_catalog(
     previous_build: CatalogBuild | None = None,
     image_loader: ImageLoader | None = None,
     batch_size: int = 16,
+    force_embed_keys: Iterable[str] = (),
 ) -> CatalogBuild:
     if batch_size <= 0:
         raise ValidationError("batch_size must be a positive integer")
@@ -579,6 +580,12 @@ def build_catalog(
     normalized_rows = _prepare_rows(rows, descriptor)
     if not normalized_rows:
         raise ValidationError("source rows must not be empty")
+    force_embed_keys = frozenset(force_embed_keys)
+    unknown_keys = force_embed_keys.difference(row.key for row in normalized_rows)
+    if unknown_keys:
+        raise ValidationError(
+            f"forced embedding keys are missing from source rows: {sorted(unknown_keys)}"
+        )
     if previous_build is not None:
         _validate_previous_build(
             previous_build,
@@ -594,6 +601,7 @@ def build_catalog(
         previous_build=previous_build,
         seed_embeddings=seed_embeddings,
         batch_size=batch_size,
+        force_embed_keys=force_embed_keys,
     )
     delta_operations, delta_embeddings, metadata_operations = _build_deltas(
         normalized_rows,
@@ -1287,6 +1295,7 @@ def _build_embeddings(
     previous_build: CatalogBuild | None,
     seed_embeddings: Mapping[str, ArrayLike] | None,
     batch_size: int,
+    force_embed_keys: frozenset[str],
 ) -> NDArray[np.float16]:
     expected_dim = None if previous_build is None else previous_build.embeddings.shape[1]
     previous_lookup: dict[str, int] = {}
@@ -1300,6 +1309,9 @@ def _build_embeddings(
     slots: list[NDArray[np.float16] | None] = [None] * len(rows)
     pending_indexes: list[int] = []
     for index, row in enumerate(rows):
+        if row.key in force_embed_keys:
+            pending_indexes.append(index)
+            continue
         seed_embedding = seed_lookup.get(row.key)
         if seed_embedding is not None:
             slots[index] = seed_embedding.astype(np.float16, copy=True)
@@ -1435,6 +1447,7 @@ def _build_deltas(
     if previous_build is None:
         return [], np.empty((0, embeddings.shape[1]), dtype=np.float16), []
     previous_rows = {row.key: row for row in previous_build.rows}
+    previous_indexes = {row.key: index for index, row in enumerate(previous_build.rows)}
     delta_operations: list[dict[str, Any]] = []
     delta_embedding_rows: list[NDArray[np.float16]] = []
     previous_keys = set(previous_rows)
@@ -1445,7 +1458,13 @@ def _build_deltas(
         delta_operations.append({"op": "delete", **_identity_target(previous_row)})
     for index, row in enumerate(rows):
         previous_row = previous_rows.get(row.key)
-        if previous_row is None or _requires_delta_upsert(previous_row, row):
+        if (
+            previous_row is None
+            or _requires_delta_upsert(previous_row, row)
+            or not np.array_equal(
+                previous_build.embeddings[previous_indexes[row.key]], embeddings[index]
+            )
+        ):
             delta_operations.append(
                 {
                     "op": "upsert",

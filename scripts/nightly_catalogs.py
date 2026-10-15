@@ -187,6 +187,11 @@ def parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--batch-size", type=int, default=16)
     parser.add_argument("--checkpoint-interval", type=int, default=10)
     parser.add_argument("--retained-deltas", type=int, default=30)
+    parser.add_argument(
+        "--rebuild-landscape-embeddings",
+        action="store_true",
+        help="Re-embed cached landscape images as a one-time portrait-normalization migration",
+    )
     return parser.parse_args(argv)
 
 
@@ -206,6 +211,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         batch_size=args.batch_size,
         expected_source_revisions=expected_revisions,
         skip_unchanged=True,
+        rebuild_landscape_embeddings=args.rebuild_landscape_embeddings,
     )
     published_at = args.published_at or _now()
     inputs = {

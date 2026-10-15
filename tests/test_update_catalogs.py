@@ -84,6 +84,19 @@ def test_repository_config_exposes_one_default_scryfall_catalog() -> None:
     assert scryfall[0].seed_required
 
 
+def test_repository_keeps_published_milo_identity() -> None:
+    published_identity = (
+        "collectorvision@9d45a37ebfe40f22ece70507015645de134dc3ec:"
+        "milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df"
+    )
+    assert updater.MILO1_MODEL_ID == published_identity
+    assert all(
+        config.embedding_model == published_identity
+        for config in updater.load_config(Path("config/catalogs.json"))
+        if config.enabled
+    )
+
+
 def test_repository_config_enables_target_tcgplayer_catalogs() -> None:
     configs = updater.load_config(Path("config/catalogs.json"))
     categories = {
@@ -442,6 +455,24 @@ def test_scryfall_cache_rejects_legacy_png_after_source_revision_gap(tmp_path: P
     assert not cache.is_current(row)
 
 
+@pytest.mark.parametrize("revision_gap, expected_current", [(0, True), (1, False)])
+def test_legacy_png_row_reuses_webp_only_at_matching_revision(
+    tmp_path: Path, revision_gap: int, expected_current: bool
+) -> None:
+    revision = 1_800_000_000
+    row = make_row(f"https://cards.scryfall.io/png/front/c/a/{CARD_ID}.png?{revision}")
+    webp_path = tmp_path / "scryfall/images/display/front/c/a" / f"{CARD_ID}.webp"
+    webp_path.parent.mkdir(parents=True)
+    Image.new("RGB", (2, 3)).save(webp_path)
+    os.utime(webp_path, (revision + revision_gap, revision + revision_gap))
+    cache = updater.ScryfallImageCache(tmp_path, [row])
+
+    assert cache.is_current(row) is expected_current
+    if expected_current:
+        with cache(row.image_url) as image:
+            assert image.size == (2, 3)
+
+
 def test_webp_format_change_reuses_previous_embedding_within_revision_window(
     tmp_path: Path,
 ) -> None:
@@ -667,6 +698,59 @@ def test_build_requires_seed_unless_full_rebuild_is_explicit(tmp_path: Path) -> 
         )
 
 
+@pytest.mark.parametrize("source_type", ["scryfall", "tcgcsv"])
+def test_image_change_budget_is_checked_before_downloads(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, source_type: str
+) -> None:
+    config_path = tmp_path / "catalogs.json"
+    make_config(config_path)
+    payload = json.loads(config_path.read_text())
+    payload["catalogs"][0]["source"]["type"] = source_type
+    payload["catalogs"][0]["max_changed_rows"] = 0
+    config_path.write_text(json.dumps(payload))
+    config = updater.load_config(config_path)[0]
+    previous_dir = tmp_path / "previous"
+    row = make_row()
+    updater.build_catalog(
+        [row],
+        embedder=lambda images: np.array([[1.0, 0.0]], dtype=np.float32),
+        output_dir=previous_dir,
+        catalog_key=config.key,
+        version="0",
+        embedding_model=config.embedding_model,
+        source_revision=updater.SourceRevision(
+            source_type=source_type,
+            source_name="test",
+            updated_at="2000-01-01T00:00:00Z",
+            uri="memory://test",
+            identity="test",
+        ),
+        descriptor=config.descriptor,
+        image_loader=lambda _: Image.new("RGB", (2, 3)),
+    )
+    monkeypatch.setattr(
+        updater,
+        "refresh_tcgplayer_images",
+        lambda *args, **kwargs: pytest.fail("over-budget build downloaded images"),
+    )
+    monkeypatch.setattr(
+        updater.ScryfallImageCache,
+        "__init__",
+        lambda *args, **kwargs: pytest.fail("over-budget build initialized image cache"),
+    )
+    with pytest.raises(ValidationError, match="exceeding its safety limit of 0"):
+        updater.build_enabled_catalogs(
+            config_path=config_path,
+            previous_dir=previous_dir,
+            output_dir=tmp_path / "updated",
+            version="1",
+            source_rows_factory=lambda _: [replace(row, image_fingerprint="new-image")],
+            cache_root=tmp_path / "image-cache",
+            rebuild_landscape_embeddings=True,
+            embedder_factory=lambda *args: pytest.fail("over-budget build loaded the model"),
+        )
+
+
 def test_descriptor_label_change_reuses_embeddings_and_starts_fresh_snapshot(
     tmp_path: Path,
 ) -> None:
@@ -798,6 +882,107 @@ def test_catalog_local_update_skips_unchanged_rows(tmp_path: Path) -> None:
     assert summary["catalogs"][0]["changed"] is False
     assert not (output_dir / "catalog-index-v2.json").exists()
     assert not (output_dir / "milo1--scryfall--mtg.manifest.json").exists()
+
+
+def test_landscape_rebuild_reembeds_only_cached_landscape_rows(tmp_path: Path) -> None:
+    config_path = tmp_path / "catalogs.json"
+    make_config(config_path)
+    portrait = replace(
+        make_row(f"https://cards.scryfall.io/display/front/c/a/{CARD_ID}.webp"),
+        image_fingerprint="portrait-fingerprint",
+    )
+    landscape_id = "ca000000-0000-0000-0000-000000000002"
+    landscape = replace(
+        portrait,
+        id=landscape_id,
+        image_url=f"https://cards.scryfall.io/display/front/c/a/{landscape_id}.webp",
+        image_fingerprint="landscape-fingerprint",
+    )
+    previous_dir = tmp_path / "previous"
+    config = updater.load_config(config_path)[0]
+    updater.build_catalog(
+        [portrait, landscape],
+        embedder=lambda images: np.array([[0.6, 0.8], [1.0, 0.0]], dtype=np.float32),
+        output_dir=previous_dir,
+        catalog_key=config.key,
+        version="0",
+        embedding_model=config.embedding_model,
+        source_revision=updater.SourceRevision(
+            source_type="scryfall",
+            source_name="default_cards",
+            updated_at="2000-01-01T00:00:00Z",
+            uri="memory://default-cards",
+            identity="previous-source",
+        ),
+        descriptor=config.descriptor,
+        image_loader=lambda _: Image.new("RGB", (2, 3)),
+    )
+    cache_root = tmp_path / "image-cache"
+    image_cache = updater.ScryfallImageCache(cache_root, [portrait, landscape])
+    for row, size in ((portrait, (2, 3)), (landscape, (3, 2))):
+        path = image_cache.path_for_row(row)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        Image.new("RGB", size).save(path)
+    embedded_sizes: list[tuple[int, int]] = []
+
+    def embed(images: list[Image.Image]) -> np.ndarray:
+        embedded_sizes.extend(image.size for image in images)
+        return np.tile(
+            np.array([[0.0, 1.0]], dtype=np.float32),
+            (len(images), 1),
+        )
+
+    summary = updater.build_enabled_catalogs(
+        config_path=config_path,
+        previous_dir=previous_dir,
+        output_dir=tmp_path / "updated",
+        version={"milo1/scryfall/mtg": "1"},
+        cache_root=cache_root,
+        source_rows_factory=lambda _: [portrait, landscape],
+        embedder_factory=lambda _model, _batch: embed,
+        image_loader=lambda url: Image.new(
+            "RGB",
+            (3, 2) if url == landscape.image_url else (2, 3),
+        ),
+        skip_unchanged=True,
+        rebuild_landscape_embeddings=True,
+    )
+
+    build = updater.load_catalog_build(
+        tmp_path / "updated" / updater.manifest_filename_for_catalog(config.key),
+        asset_dir=tmp_path / "updated",
+    )
+    quality_report = json.loads(
+        (tmp_path / "updated" / "quality-report.json").read_text(encoding="utf-8")
+    )
+    assert summary["catalogs"][0]["changed"] is True
+    assert summary["catalogs"][0]["delta_operations"] == 1
+    assert quality_report["catalogs"][config.key]["landscape_rows_rebuilt"] == 1
+    assert embedded_sizes == [(3, 2)]
+    assert np.array_equal(
+        build.embeddings,
+        np.array([[0.6, 0.8], [0.0, 1.0]], dtype=np.float16),
+    )
+    original = updater.load_catalog_build(
+        previous_dir / updater.manifest_filename_for_catalog(config.key),
+        asset_dir=previous_dir,
+    )
+    assert build.rows == original.rows
+    updater.validate_artifacts(
+        tmp_path / "updated" / updater.manifest_filename_for_catalog(config.key),
+        previous_build=original,
+    )
+    subsequent = updater.build_enabled_catalogs(
+        config_path=config_path,
+        previous_dir=tmp_path / "updated",
+        output_dir=tmp_path / "subsequent",
+        version="2",
+        source_rows_factory=lambda _: [portrait, landscape],
+        embedder_factory=lambda *args: pytest.fail("normal update repeated the migration"),
+        image_loader=lambda _: pytest.fail("normal update reloaded a migrated image"),
+        skip_unchanged=True,
+    )
+    assert subsequent["changed"] is False
 
 
 def test_catalog_local_update_publishes_descriptor_only_changes(tmp_path: Path) -> None:

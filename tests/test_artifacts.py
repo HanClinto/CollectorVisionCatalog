@@ -40,6 +40,8 @@ from collectorvision_catalog import (
     load_public_delta_records,
     load_public_embeddings,
     manifest_filename_for_catalog,
+    plan_catalog_version,
+    publish_catalog_version,
     validate_artifacts,
 )
 from collectorvision_catalog.artifacts import AssetInfo, CatalogManifest
@@ -118,6 +120,72 @@ def _normalized_embedding_for_color(color: tuple[int, int, int]) -> np.ndarray:
     )
     embedding /= np.linalg.norm(embedding)
     return embedding
+
+
+@pytest.mark.parametrize("color, operations", [((0, 0, 255), 1), ((255, 0, 0), 0)])
+def test_forced_embedding_overrides_reuse_and_emits_exact_predecessor_delta(
+    workspace: Path, color: tuple[int, int, int], operations: int,
+) -> None:
+    rows = [
+        make_row("alpha", "memory://alpha", "fp-alpha"),
+        make_row("beta", "memory://beta", "fp-beta"),
+    ]
+    previous, _, _, _ = _build_initial_catalog(
+        workspace, rows, {"memory://alpha": (255, 0, 0), "memory://beta": (0, 255, 0)}
+    )
+    previous = replace(previous, manifest=replace(previous.manifest, version="0"))
+    embedder = TrackingEmbedder()
+    loader = TrackingImageLoader({"memory://alpha": color})
+    build = build_catalog(
+        rows,
+        embedder=embedder,
+        image_loader=loader,
+        output_dir=workspace / "forced",
+        catalog_key=CATALOG_KEY,
+        version="1",
+        embedding_model=EMBEDDING_MODEL,
+        previous_build=previous,
+        seed_embeddings={rows[0].key: previous.embeddings[0]},
+        force_embed_keys={rows[0].key},
+    )
+    assert build.rows == previous.rows
+    assert loader.calls == ["memory://alpha"]
+    assert build.manifest.delta.operations == operations
+    assert np.array_equal(build.embeddings[1], previous.embeddings[1])
+    assert np.array_equal(build.embeddings[0], previous.embeddings[0]) is (operations == 0)
+    validate_artifacts(
+        workspace / "forced" / manifest_filename_for_catalog(CATALOG_KEY),
+        previous_build=previous,
+    )
+    if operations:
+        receipt, public_dir = publish_catalog_version(
+            build,
+            workspace / "forced",
+            workspace / "public",
+            "scryfall-mtg",
+            plan_catalog_version(0),
+            previous_build=previous,
+        )
+        assert receipt.delta is not None
+        assert receipt.delta.recognition_rows == 1
+        payload = gzip.decompress(
+            (public_dir / receipt.delta.assets["embeddings"].path).read_bytes()
+        )
+        assert payload == build.embeddings[0].tobytes()
+
+
+def test_forced_embedding_rejects_unknown_row_keys(workspace: Path) -> None:
+    with pytest.raises(ValidationError, match="forced embedding keys are missing"):
+        build_catalog(
+            [make_row("alpha", "memory://alpha", "fp-alpha")],
+            embedder=TrackingEmbedder(),
+            image_loader=TrackingImageLoader({}),
+            output_dir=workspace / "forced",
+            catalog_key=CATALOG_KEY,
+            version="v1",
+            embedding_model=EMBEDDING_MODEL,
+            force_embed_keys={"missing-row"},
+        )
 
 
 def test_build_outputs_are_deterministic_and_loadable(workspace: Path) -> None:

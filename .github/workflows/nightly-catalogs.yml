@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       bootstrap_release:
-        description: Draft release tag containing builder-state.tar.gz for the first run
+        description: Draft release containing builder-state.tar.gz (overrides retained state)
         required: false
         type: string
 
@@ -47,25 +47,26 @@ jobs:
           BOOTSTRAP_RELEASE: ${{ inputs.bootstrap_release }}
         run: |
           mkdir -p "$WORK_ROOT/state-artifact"
-          artifact_json="$(gh api \
-            "repos/$GITHUB_REPOSITORY/actions/artifacts?name=catalog-v2-builder-state&per_page=100")"
-          run_id="$(jq -r \
-            '[.artifacts[] | select(.expired == false)] | sort_by(.created_at) | last | .workflow_run.id // empty' \
-            <<<"$artifact_json")"
-          if [[ -n "$run_id" ]]; then
-            gh run download "$run_id" \
-              --repo "$GITHUB_REPOSITORY" \
-              --name catalog-v2-builder-state \
-              --dir "$WORK_ROOT/state-artifact"
-          elif [[ -n "$BOOTSTRAP_RELEASE" ]]; then
+          if [[ -n "$BOOTSTRAP_RELEASE" ]]; then
             gh release download "$BOOTSTRAP_RELEASE" \
               --repo "$GITHUB_REPOSITORY" \
               --pattern builder-state.tar.gz \
               --dir "$WORK_ROOT"
             tar -xzf "$WORK_ROOT/builder-state.tar.gz" -C "$WORK_ROOT/state-artifact"
           else
-            echo "No builder-state artifact exists; dispatch with bootstrap_release." >&2
-            exit 1
+            artifact_json="$(gh api \
+              "repos/$GITHUB_REPOSITORY/actions/artifacts?name=catalog-v2-builder-state&per_page=100")"
+            run_id="$(jq -r \
+              '[.artifacts[] | select(.expired == false)] | sort_by(.created_at) | last | .workflow_run.id // empty' \
+              <<<"$artifact_json")"
+            if [[ -z "$run_id" ]]; then
+              echo "No builder-state artifact exists; dispatch with bootstrap_release." >&2
+              exit 1
+            fi
+            gh run download "$run_id" \
+              --repo "$GITHUB_REPOSITORY" \
+              --name catalog-v2-builder-state \
+              --dir "$WORK_ROOT/state-artifact"
           fi
           python - <<'PY'
           import json
