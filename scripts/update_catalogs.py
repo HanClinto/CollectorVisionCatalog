@@ -12,7 +12,7 @@ from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, BinaryIO
 from urllib.error import HTTPError, URLError
@@ -52,6 +52,7 @@ MILO1_MODEL_ID = (
     "milo-1.0.0@sha256:bd13d8d60383c69da04dce261f32e93fdaeaa8fd618fbc991e7385f71b3d45df"
 )
 DEFAULT_CACHE_ROOT = Path(os.environ.get("COLLECTORVISION_CACHE_ROOT", "data-cache"))
+MAX_SCRYFALL_IMAGE_REVISION_GAP_SECONDS = 3 * 24 * 60 * 60
 
 
 class TCGplayerImageUnavailable(ValidationError):
@@ -579,6 +580,8 @@ def build_enabled_catalogs(
         rows = list(quality_result.rows)
         quality_reports[config.key] = quality_result.report()
         quality_reports[config.key]["source_revision"] = snapshot.revision.to_dict()
+        if source_type == "scryfall" and previous is not None:
+            rows = list(_preserve_recent_scryfall_images(rows, previous.rows))
         if seed_embeddings is not None:
             reusable_keys = {
                 row.key
@@ -919,6 +922,7 @@ class ScryfallImageCache:
             current_path = self.path_for_row(row)
             legacy_png_path = self._legacy_png_path(row)
             previous_url = previous_image_urls.get(row.key)
+            revision = scryfall_image_revision(row.image_url)
             allow_legacy_png = (
                 current_path.suffix == ".webp"
                 and row.image_url not in force_refresh_legacy_png_urls
@@ -932,7 +936,7 @@ class ScryfallImageCache:
                 (
                     current_path,
                     legacy_png_path if allow_legacy_png else None,
-                    scryfall_image_revision(row.image_url),
+                    revision,
                 )
             )
         self._entries = {
@@ -1010,7 +1014,15 @@ class ScryfallImageCache:
             revision == 0 or abs(current_path.stat().st_mtime - revision) < 1.0
         ):
             return current_path
-        if legacy_png_path is not None and legacy_png_path.is_file():
+        if (
+            legacy_png_path is not None
+            and legacy_png_path.is_file()
+            and (
+                revision == 0
+                or revision - int(legacy_png_path.stat().st_mtime)
+                <= MAX_SCRYFALL_IMAGE_REVISION_GAP_SECONDS
+            )
+        ):
             return legacy_png_path
         return None
 
@@ -1244,6 +1256,31 @@ def _count_changed_image_rows(
     current_keys = {row.key for row in rows}
     removed = len(set(previous_fingerprints).difference(current_keys))
     return changed_or_added + removed
+
+
+def _preserve_recent_scryfall_images(
+    current_rows: Sequence[RecognitionRow],
+    previous_rows: Sequence[RecognitionRow],
+) -> tuple[RecognitionRow, ...]:
+    previous_by_key = {row.key: row for row in previous_rows}
+    preserved_rows: list[RecognitionRow] = []
+    for current_row in current_rows:
+        previous_row = previous_by_key.get(current_row.key)
+        if (
+            previous_row is not None
+            and _is_legacy_scryfall_png_url(previous_row.image_url)
+            and Path(urlparse(current_row.image_url).path).suffix.lower() == ".webp"
+            and scryfall_image_revision(current_row.image_url)
+            - scryfall_image_revision(previous_row.image_url)
+            <= MAX_SCRYFALL_IMAGE_REVISION_GAP_SECONDS
+        ):
+            current_row = replace(
+                current_row,
+                image_url=previous_row.image_url,
+                image_fingerprint=previous_row.image_fingerprint,
+            )
+        preserved_rows.append(current_row)
+    return tuple(preserved_rows)
 
 
 def load_previous_image_state(

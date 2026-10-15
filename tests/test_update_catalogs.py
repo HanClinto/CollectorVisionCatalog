@@ -382,6 +382,17 @@ def test_scryfall_cache_refreshes_after_webp_revision_changes(tmp_path: Path) ->
     )
 
     assert not cache.is_current(row)
+    previous_row = replace(make_row(previous_url), image_fingerprint="png-fingerprint")
+    current_row = replace(row, image_fingerprint="webp-fingerprint")
+    preserved_row = updater._preserve_recent_scryfall_images(
+        [current_row],
+        [previous_row],
+    )[0]
+    assert preserved_row == current_row
+    assert updater._count_changed_image_rows(
+        [preserved_row],
+        SimpleNamespace(rows=(previous_row,)),
+    ) == 1
 
 
 def test_scryfall_cache_can_force_refresh_legacy_png(tmp_path: Path) -> None:
@@ -402,6 +413,96 @@ def test_scryfall_cache_can_force_refresh_legacy_png(tmp_path: Path) -> None:
     )
 
     assert not cache.is_current(row)
+
+
+def test_scryfall_cache_rejects_legacy_png_after_source_revision_gap(tmp_path: Path) -> None:
+    images_root = tmp_path / "scryfall" / "images"
+    png_path = images_root / "png" / "front" / "c" / "a" / f"{CARD_ID}.png"
+    png_path.parent.mkdir(parents=True)
+    Image.new("RGB", (2, 2)).save(png_path)
+    cached_revision = 1_800_000_000
+    current_revision = (
+        cached_revision + updater.MAX_SCRYFALL_IMAGE_REVISION_GAP_SECONDS + 1
+    )
+    os.utime(png_path, (cached_revision, cached_revision))
+    row = make_row(
+        f"https://cards.scryfall.io/display/front/c/a/{CARD_ID}.webp?"
+        f"{current_revision}"
+    )
+    previous_url = (
+        f"https://cards.scryfall.io/png/front/c/a/{CARD_ID}.png?{cached_revision}"
+    )
+
+    cache = updater.ScryfallImageCache(
+        tmp_path,
+        [row],
+        previous_image_urls={row.key: previous_url},
+    )
+
+    assert not cache.is_current(row)
+
+
+def test_webp_format_change_reuses_previous_embedding_within_revision_window(
+    tmp_path: Path,
+) -> None:
+    config_path = tmp_path / "catalogs.json"
+    make_config(config_path)
+    config = updater.load_config(config_path)[0]
+    previous_dir = tmp_path / "previous"
+    previous_revision = 1_800_000_000
+    previous_url = (
+        f"https://cards.scryfall.io/png/front/c/a/{CARD_ID}.png?{previous_revision}"
+    )
+    previous_row = replace(make_row(previous_url), image_fingerprint="png-fingerprint")
+    source_revision = updater.SourceRevision(
+        source_type="scryfall",
+        source_name="default_cards",
+        updated_at="2000-01-01T00:00:00Z",
+        uri="memory://default-cards",
+        identity="previous-source",
+    )
+    updater.build_catalog(
+        [previous_row],
+        embedder=lambda images: np.array([[1.0, 0.0]], dtype=np.float32),
+        output_dir=previous_dir,
+        catalog_key=config.key,
+        version="1",
+        embedding_model=config.embedding_model,
+        source_revision=source_revision,
+        descriptor=config.descriptor,
+        image_loader=lambda _: Image.new("RGB", (2, 2)),
+    )
+    current_row = replace(
+        previous_row,
+        image_url=(
+            f"https://cards.scryfall.io/display/front/c/a/{CARD_ID}.webp?"
+            f"{previous_revision + 24 * 60 * 60}"
+        ),
+        image_fingerprint="webp-fingerprint",
+    )
+
+    output_dir = tmp_path / "updated"
+    summary = updater.build_enabled_catalogs(
+        config_path=config_path,
+        previous_dir=previous_dir,
+        output_dir=output_dir,
+        version="2",
+        source_rows_factory=lambda _: [current_row],
+        embedder_factory=lambda _model, _batch: lambda _images: pytest.fail(
+            "format-only change must not recompute the embedding"
+        ),
+        image_loader=lambda _: pytest.fail("format-only change must reuse the cached image"),
+        skip_unchanged=False,
+    )
+
+    updated = updater.load_catalog_build(
+        output_dir / updater.manifest_filename_for_catalog(config.key),
+        asset_dir=output_dir,
+    )
+    assert summary["catalogs"][0]["delta_operations"] == 0
+    assert updated.rows[0].image_url == previous_url
+    assert updated.rows[0].image_fingerprint == "png-fingerprint"
+    assert np.array_equal(updated.embeddings, np.array([[1.0, 0.0]], dtype=np.float16))
 
 
 def test_tcgplayer_cache_resolves_sharded_product_image(tmp_path: Path) -> None:

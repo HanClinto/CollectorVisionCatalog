@@ -1,0 +1,81 @@
+name: Alert on catalog publication failures
+
+on:
+  workflow_run:
+    workflows:
+      - Publish Catalog v2 Nightly
+    types:
+      - completed
+
+permissions:
+  issues: write
+
+jobs:
+  alert:
+    if: github.event.workflow_run.conclusion != 'success'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ALERT_TITLE: Nightly catalog publication is failing
+      RUN_URL: ${{ github.event.workflow_run.html_url }}
+      HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+      CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+    steps:
+      - name: Create or update the assigned failure alert
+        run: |
+          {
+            echo "@HanClinto, the scheduled catalog publication did not succeed."
+            echo
+            echo "- Result: \`$CONCLUSION\`"
+            echo "- Run: $RUN_URL"
+            echo "- Commit: \`$HEAD_SHA\`"
+          } > "$RUNNER_TEMP/catalog-failure.md"
+
+          open_issues="$(gh issue list \
+            --repo "$GITHUB_REPOSITORY" \
+            --state open \
+            --limit 100 \
+            --json number,title)"
+          issue_number="$(jq -r --arg title "$ALERT_TITLE" \
+            '[.[] | select(.title == $title)] | first | .number // empty' \
+            <<<"$open_issues")"
+
+          if [[ -n "$issue_number" ]]; then
+            gh issue comment "$issue_number" \
+              --repo "$GITHUB_REPOSITORY" \
+              --body-file "$RUNNER_TEMP/catalog-failure.md"
+          else
+            gh issue create \
+              --repo "$GITHUB_REPOSITORY" \
+              --title "$ALERT_TITLE" \
+              --assignee HanClinto \
+              --body-file "$RUNNER_TEMP/catalog-failure.md"
+          fi
+
+  resolve:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      ALERT_TITLE: Nightly catalog publication is failing
+      RUN_URL: ${{ github.event.workflow_run.html_url }}
+    steps:
+      - name: Close the failure alert after a successful publication
+        run: |
+          open_issues="$(gh issue list \
+            --repo "$GITHUB_REPOSITORY" \
+            --state open \
+            --limit 100 \
+            --json number,title)"
+          issue_number="$(jq -r --arg title "$ALERT_TITLE" \
+            '[.[] | select(.title == $title)] | first | .number // empty' \
+            <<<"$open_issues")"
+
+          if [[ -n "$issue_number" ]]; then
+            gh issue comment "$issue_number" \
+              --repo "$GITHUB_REPOSITORY" \
+              --body "@HanClinto, catalog publication recovered: $RUN_URL"
+            gh issue close "$issue_number" \
+              --repo "$GITHUB_REPOSITORY" \
+              --reason completed
+          fi
